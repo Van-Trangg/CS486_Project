@@ -85,7 +85,7 @@ The attributes for each identified entity are listed below, grouped by Primary K
 | `space_name` | Descriptive | VARCHAR(100) | No | Friendly name of the space. |
 | `space_type` | Descriptive | VARCHAR(50) | No | Restricted to: 'Auditorium', 'Classroom', 'Computer Laboratory', 'Project Laboratory', 'Meeting Room', 'Student Workspace'. |
 | `building` | Descriptive | VARCHAR(50) | No | Campus building name or code. |
-| `floor` | Descriptive | INT | No | Floor number where the space is located. |
+| `floor` | Descriptive | VARCHAR(10) | No | Floor number where the space is located. |
 | `room_number` | Descriptive | VARCHAR(20) | No | Physical room number. |
 | `capacity` | Descriptive | INT | No | Must be positive (> 0). Maximum allowed occupancy. |
 | `current_status` | Descriptive | VARCHAR(20) | No | Restricted to: 'Available', 'In Use', 'Under Maintenance', 'Temporarily Closed', 'Retired'. |
@@ -130,6 +130,7 @@ The attributes for each identified entity are listed below, grouped by Primary K
 | `check_in_staff_id` | FK | VARCHAR(50) | No | Reference to `User` (staff checking in). |
 | `actual_start` | Descriptive | DATETIME | No | Physical start timestamp at check-in. Nullable|
 | `initial_condition` | Descriptive | TEXT | No | Room state at arrival. Nullable |
+| `check_out_staff_id` | FK | VARCHAR(50) | No | Reference to `User` (staff checking out). |
 | `actual_end` | Descriptive | DATETIME | No | Physical exit timestamp at checkout. Nullable. |
 | `final_condition` | Descriptive | TEXT | No | Room state at departure. Nullable. |
 | `usage_notes` | Descriptive | TEXT | No | Post-session notes or remarks. Nullable. |
@@ -174,13 +175,16 @@ The relationships established between entities are detailed below.
 7. **User Checks In Usage Session (`User_ChecksIn_UsageSession`)**
    - *Participating Entities:* `User` (1) and `UsageSession` (0..N)
    - *Business Meaning:* Facility staff physically check in and complete the usage session. Each usage session must have a checking-in staff member.
-8. **Space Requires Maintenance (`Space_Requires_Maintenance`)**
+8. **User Checks Out Usage Session (`User_ChecksOut_UsageSession`)**
+   - *Participating Entities:* `User` (1) and `UsageSession` (0..N)
+   - *Business Meaning:* Facility staff physically check out and complete the usage session. Each usage session must have a checking-out staff member.
+9. **Space Requires Maintenance (`Space_Requires_Maintenance`)**
    - *Participating Entities:* `Space` (1) and `MaintenanceRecord` (0..N)
    - *Business Meaning:* A space can undergo multiple maintenance procedures. Each maintenance record refers to exactly one physical space.
-9. **User Reports Maintenance (`User_Reports_Maintenance`)**
+10. **User Reports Maintenance (`User_Reports_Maintenance`)**
    - *Participating Entities:* `User` (1) and `MaintenanceRecord` (0..N)
    - *Business Meaning:* Any user can report physical space problems. Each maintenance record is reported by exactly one user.
-10. **User Assigned to Maintenance (`User_Assigned_To_Maintenance`)**
+11. **User Assigned to Maintenance (`User_Assigned_To_Maintenance`)**
     - *Participating Entities:* `User` (0..1) and `MaintenanceRecord` (0..N)
     - *Business Meaning:* A maintenance record can be assigned to a specific facility staff member (technician). A staff member can be assigned to multiple maintenance records.
 
@@ -263,7 +267,7 @@ The following explicit business rules are derived directly from the requirement 
     - *Requirement Text:* "A space under maintenance cannot be booked." (line 17)
 19. **Historical and Operational Reports:** The system must preserve logs and support viewing booking history, upcoming events, active maintenance, and no-show counts.
     - *Requirement Text:* "The system should keep historical records of bookings and maintenance activities. Staff should be able to view booking history, upcoming bookings, spaces under maintenance, and no-show bookings." (line 18)
-
+20. **Capacity Limit Rule:** Expected participant count must not exceed the capacity of the selected space.
 ---
 
 ## 8. Assumptions
@@ -277,7 +281,6 @@ The following operational and data design assumptions are defined to supplement 
 4. **Maintenance Blocking Mechanics:** If a space has an active/approved maintenance record, its status should be set to `'Under Maintenance'`, and no new booking requests can overlap with that maintenance timeframe.
 5. **Soft Deletion Policy:** To preserve historical booking and maintenance records, rows in `User` and `Space` are never physically deleted. Instead, they are soft-deleted by setting `User.account_status = 'Inactive'` and `Space.current_status = 'Retired'`.
 6. **Time Order Constraint:** Booking requested start must be strictly before requested end (`requested_end > requested_start`). Similarly, actual start must be strictly before actual end, and maintenance start must be before completion.
-7. **Capacity Enforcements:** Expected participant count for a booking should not exceed the physical capacity of the selected space (`expected_participants <= Space.capacity`).
 
 ---
 

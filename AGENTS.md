@@ -4,7 +4,7 @@ CS486 database systems teaching demo. Repository is empty; expect code to be add
 
 ## Recurring context
 
-- Root directory: <!-- YOUR ROOT DIRECTORY -->
+- Root directory: 
 - This is a demo project, not production.
 - Run `ls -la` to detect new files before assuming anything exists.
 

@@ -34,7 +34,10 @@ Do not skip any Markdown file.
 Use template:
 templates/business-analysis-template.md
 
-Generate:
+Read review from:
+docs\01-business-requirement-analysis-review-G02.md
+
+Generate or update:
 outputs/01-business-requirement-analysis-G02.md
 
 Requirements:

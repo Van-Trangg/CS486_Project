@@ -8,18 +8,6 @@ compatibility: opencode
 
 Use this skill after Step 1 Business Requirement Analysis has been completed.
 
-## Important Behavior
-
-Before reviewing:
-
-1. Run `ls -la`.
-2. Read the original requirement document.
-3. Read the generated business requirement analysis document.
-4. Compare the generated analysis against the original requirements.
-5. Base findings only on evidence from the requirements.
-
-Do not invent missing requirements.
-
 ---
 
 ## Input Documents
@@ -41,6 +29,18 @@ Create or update:
 `docs/01-business-requirement-analysis-review-G02.md`
 
 Do not skip this file.
+
+---
+
+## Important Behavior
+
+Before reviewing:
+
+1. Verify that both input files exist before starting the review.
+2. Compare the generated analysis against the original requirements.
+3. Base findings only on evidence from the requirements.
+4. Do not recommend changes unless there is clear evidence from the requirements, logical inconsistency, or a significant design improvement.
+Do not invent missing requirements.
 
 ---
 
@@ -66,7 +66,7 @@ Report any missing sections.
 
 ## 2. Requirement Coverage
 
-Verify that all important information from the requirement document has been captured.
+Verify that all important information from the requirement document has been correctly captured in the analysis.
 
 Check for:
 
@@ -74,12 +74,15 @@ Check for:
 * Missing entities
 * Missing attributes
 * Missing relationships
+* Missing cardinalities
 * Missing business rules
 
-For every missing item:
+For every issue:
 
 * Quote or reference the requirement statement.
 * Explain why it should appear in the analysis.
+* Explain the impact of the omission.
+* Suggest a correction.
 
 ---
 
@@ -106,8 +109,41 @@ Verify that:
 Identify unsupported assumptions.
 
 ---
+## 5. Design Quality Review
 
-## 5. Quality Assessment
+Actively challenge the analysis and search for design weaknesses, not only missing information.
+
+Check for:
+
+* Incorrect actors
+* Incorrect entities
+* Incorrect attributes
+* Incorrect relationships
+* Incorrect cardinalities
+* Incorrect business rules
+* Incorrect assumptions
+* Misplaced information
+* Unsupported assumptions
+* Over-engineered design decisions
+* Under-specified design decisions
+* Data integrity concerns
+* Auditability concerns
+
+For every suspected issue:
+
+* Describe the issue.
+* Explain why it may be incorrect.
+* Reference the relevant requirement text or design element.
+* Explain the potential impact.
+* Suggest a correction.
+
+Do not assume the analysis is correct simply because information is present.
+Challenge the design and look for weaknesses.
+
+---
+
+
+## 6. Quality Assessment
 
 Evaluate:
 
@@ -129,12 +165,11 @@ The review document must contain:
 # Strengths
 
 # Issues Found
-
 For each issue:
 
 * Issue
-* Evidence
-* Impact
+* Evidence (Missing Items/Incorrect Items)
+* Impact (Design Concerns)
 * Suggested Fix
 
 # Scores
