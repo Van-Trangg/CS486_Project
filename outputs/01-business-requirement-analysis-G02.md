@@ -48,16 +48,13 @@ The following candidate entities have been identified based on the business requ
 3. **Facility**
    - *Description:* A master catalog of standard equipment or items that can be equipped inside campus spaces.
    - *Justification:* Necessary to represent standard available facility items (such as projectors, whiteboards, microphones, etc.) to catalog what items can be tracked in the rooms. (Requirement: "Each space may have several facilities, such as a projector... The system should store the list of facilities...")
-4. **SpaceFacility** (Associative Entity)
-   - *Description:* Represents the specific quantity and condition of a standard facility catalog item within a particular bookable space.
-   - *Justification:* Bridges Spaces and Facilities in a many-to-many relationship, tracking how many of a specific equipment type are present in a space and their operational condition. (Requirement: "The system should store the list of facilities available in each space.")
-5. **Booking**
+4. **Booking**
    - *Description:* Represents a reservation request submitted by a user for a physical space over a requested time slot.
    - *Justification:* Needed to track the request metadata, proposed timing, purposes, expected participants, and the entire approval/rejection decision details. (Requirement: "Users can submit booking requests... Each booking request has a status... records the staff member who made the decision, the decision time, and a decision note.")
-6. **UsageSession**
+5. **UsageSession**
    - *Description:* Represents the actual physical usage of a booked space, tracked by facility staff at check-in and checkout.
    - *Justification:* Distinct from a Booking request, this tracks real-world check-in/out timestamps, staff verifiers, and room conditions at arrival and departure. (Requirement: "When the requester arrives, facility staff can check in the booking... record actual start/end time, initial/final condition...")
-7. **MaintenanceRecord**
+6. **MaintenanceRecord**
    - *Description:* Tracks reported problems, repairs, and scheduled downtime for specific physical spaces.
    - *Justification:* Required to log maintenance tasks, identify reporters and assigned staff, describe problems, track repair duration, and enforce the rule that spaces under maintenance cannot be booked. (Requirement: "The system also supports basic maintenance management... Each maintenance record stores the related space, reporter, assigned staff member...")
 
@@ -89,14 +86,14 @@ The attributes for each identified entity are listed below, grouped by Primary K
 | `room_number` | Descriptive | VARCHAR(20) | No | Physical room number. |
 | `capacity` | Descriptive | INT | No | Must be positive (> 0). Maximum allowed occupancy. |
 | `current_status` | Descriptive | VARCHAR(20) | No | Restricted to: 'Available', 'In Use', 'Under Maintenance', 'Temporarily Closed', 'Retired'. |
-| `usage_policy` | Descriptive | TEXT | No | Policy rules and priority guidelines for this space. |
+| `usage_policy` | Descriptive | NVARCHAR(MAX) | No | Policy rules and priority guidelines for this space. |
 
 ### 4.3. `Facility` Entity
 | Attribute Name | Category | Data Type | Candidate Identifier | Description / Constraints |
 | :--- | :--- | :--- | :--- | :--- |
 | `facility_id` | PK / Identifier | INT (Identity) | Yes (Primary) | Auto-incrementing identifier. |
 | `facility_name` | Descriptive | VARCHAR(100) | Yes (Alternate) | Unique name (e.g., 'Projector', 'Whiteboard', 'Microphone'). |
-| `facility_description` | Descriptive | TEXT | No | General specifications or notes. |
+| `facility_description` | Descriptive | NVARCHAR(MAX) | No | General specifications or notes. |
 
 
 ### 4.4. `Booking` Entity
@@ -113,7 +110,7 @@ The attributes for each identified entity are listed below, grouped by Primary K
 | `created_at` | Descriptive | DATETIME | No | Default: Current database time (`GETDATE()`). |
 | `approver_id` | FK | VARCHAR(50) | No | Reference to `User` (approving staff/manager). Nullable. |
 | `decision_time` | Descriptive | DATETIME | No | Time decision was made. Nullable. |
-| `decision_note` | Descriptive | TEXT | No | Staff decision notes. Nullable. |
+| `decision_note` | Descriptive | NVARCHAR(MAX) | No | Staff decision notes. Nullable. |
 | `rejection_reason` | Descriptive | VARCHAR(255) | No | Populated if `booking_status` = 'Rejected'. Nullable. |
 
 ### 4.5. `UsageSession` Entity
@@ -122,11 +119,11 @@ The attributes for each identified entity are listed below, grouped by Primary K
 | `booking_id` | PK / FK | INT | Yes (Primary) | Reference to `Booking`. Establishes 1-to-1 mapping. |
 | `check_in_staff_id` | FK | VARCHAR(50) | No | Reference to `User` (staff checking in). |
 | `actual_start` | Descriptive | DATETIME | No | Physical start timestamp at check-in. Nullable|
-| `initial_condition` | Descriptive | TEXT | No | Room state at arrival. Nullable |
+| `initial_condition` | Descriptive | NVARCHAR(MAX) | No | Room state at arrival. Nullable |
 | `check_out_staff_id` | FK | VARCHAR(50) | No | Reference to `User` (staff checking out). Nullable. |
 | `actual_end` | Descriptive | DATETIME | No | Physical exit timestamp at checkout. Nullable. |
-| `final_condition` | Descriptive | TEXT | No | Room state at departure. Nullable. |
-| `usage_notes` | Descriptive | TEXT | No | Post-session notes or remarks. Nullable. |
+| `final_condition` | Descriptive | NVARCHAR(MAX) | No | Room state at departure. Nullable. |
+| `usage_notes` | Descriptive | NVARCHAR(MAX) | No | Post-session notes or remarks. Nullable. |
 
 ### 4.6. `MaintenanceRecord` Entity
 | Attribute Name | Category | Data Type | Candidate Identifier | Description / Constraints |
@@ -135,11 +132,11 @@ The attributes for each identified entity are listed below, grouped by Primary K
 | `space_code` | FK | VARCHAR(50) | No | Reference to `Space`. |
 | `reporter_id` | FK | VARCHAR(50) | No | Reference to `User` who reported the issue. |
 | `assigned_staff_id` | FK | VARCHAR(50) | No | Reference to `User` (facility staff technician). Nullable. |
-| `problem_description` | Descriptive | TEXT | No | Details about the issue. |
+| `problem_description` | Descriptive | NVARCHAR(MAX) | No | Details about the issue. |
 | `start_time` | Descriptive | DATETIME | No | Maintenance beginning timestamp. |
 | `completion_time` | Descriptive | DATETIME | No | Maintenance completion timestamp (must be > `start_time`). Nullable. |
 | `maintenance_status` | Descriptive | VARCHAR(20) | No | Restricted to: 'Reported', 'In Progress', 'Resolved', 'Cancelled'. |
-| `result_note` | Descriptive | TEXT | No | Summary of repairs or outcomes. Nullable. |
+| `result_note` | Descriptive | NVARCHAR(MAX) | No | Summary of repairs or outcomes. Nullable. |
 
 ---
 
@@ -208,10 +205,10 @@ The cardinality and participation constraints for each relationship are justifie
 ### 6.8. `Space` to `MaintenanceRecord` — **(0,N) : (1,1)**
 - **Justification:** A physical space may have had 0 maintenance activities, or can have many (N) reported problems over its lifespan. Each maintenance record must belong to exactly 1 space (`space_code` is mandatory). Participation is optional on the Space side and mandatory on the Maintenance Record side.
 
-### 6.9. `User` to `MaintenanceRecord` (Reporter) — **(0,N) : (0,1)**
+### 6.9. `User` to `MaintenanceRecord` (Reporter) — **(0,N) : (1,1)**
 - **Justification:** A user (student, lecturer, or staff) can report 0 or many maintenance issues. Every maintenance record must be submitted by exactly 1 reporting user (`reporter_id` is mandatory). Participation is optional on the User side and mandatory on the Maintenance Record side.
 
-### 6.10. `User` to `MaintenanceRecord` (Assigned Staff) — **(0,N) : (1,1)**
+### 6.10. `User` to `MaintenanceRecord` (Assigned Staff) — **(0,N) : (0,1)**
 - **Justification:** When a problem is newly reported, it might not be assigned to a technician immediately (0). Once assigned, it is handled by exactly 1 facility staff member. A technician can be assigned to 0 or many maintenance records. Participation is optional on both sides (`assigned_staff_id` is nullable).
 
 ---
@@ -242,7 +239,7 @@ The following explicit business rules are derived directly from the requirement 
     - *Requirement Text:* "Each booking request has a status, such as pending, approved, rejected, cancelled, checked in, completed, or no-show." (line 14)
 11. **Double Booking Prevention:** Overlapping approved bookings for the same space are strictly forbidden.
     - *Requirement Text:* "The system must prevent conflicting bookings. The same space cannot have two approved bookings with overlapping time periods." (line 14)
-12. **Unavailable Spaces Blocked:** Bookings cannot be approved for unavailable, closed, or retired rooms.
+12. **Unavailable Spaces Blocked:** Bookings cannot be approved for unavailable, temporarily closed, or retired rooms.
     - *Requirement Text:* "A space that is under maintenance, closed, or retired cannot be booked." (line 14)
 13. **Approval Tracking:** Decisions on booking approvals must record the staff/manager who decided, decision time, and feedback notes.
     - *Requirement Text:* "When a booking is approved or rejected, the system records the staff member who made the decision, the decision time, and a decision note." (line 15)
