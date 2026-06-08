@@ -98,15 +98,8 @@ The attributes for each identified entity are listed below, grouped by Primary K
 | `facility_name` | Descriptive | VARCHAR(100) | Yes (Alternate) | Unique name (e.g., 'Projector', 'Whiteboard', 'Microphone'). |
 | `facility_description` | Descriptive | TEXT | No | General specifications or notes. |
 
-### 4.4. `SpaceFacility` Entity
-| Attribute Name | Category | Data Type | Candidate Identifier | Description / Constraints |
-| :--- | :--- | :--- | :--- | :--- |
-| `space_code` | PK / FK | VARCHAR(50) | Yes (Composite) | Reference to `Space`. |
-| `facility_id` | PK / FK | INT | Yes (Composite) | Reference to `Facility`. |
-| `quantity` | Descriptive | INT | No | Count of this facility in the room. Must be > 0. |
-| `operational_status` | Descriptive | VARCHAR(20) | No | Restricted to: 'Operational', 'Faulty', 'Missing'. |
 
-### 4.5. `Booking` Entity
+### 4.4. `Booking` Entity
 | Attribute Name | Category | Data Type | Candidate Identifier | Description / Constraints |
 | :--- | :--- | :--- | :--- | :--- |
 | `booking_id` | PK / Identifier | INT (Identity) | Yes (Primary) | Auto-incrementing identifier. |
@@ -123,19 +116,19 @@ The attributes for each identified entity are listed below, grouped by Primary K
 | `decision_note` | Descriptive | TEXT | No | Staff decision notes. Nullable. |
 | `rejection_reason` | Descriptive | VARCHAR(255) | No | Populated if `booking_status` = 'Rejected'. Nullable. |
 
-### 4.6. `UsageSession` Entity
+### 4.5. `UsageSession` Entity
 | Attribute Name | Category | Data Type | Candidate Identifier | Description / Constraints |
 | :--- | :--- | :--- | :--- | :--- |
 | `booking_id` | PK / FK | INT | Yes (Primary) | Reference to `Booking`. Establishes 1-to-1 mapping. |
 | `check_in_staff_id` | FK | VARCHAR(50) | No | Reference to `User` (staff checking in). |
 | `actual_start` | Descriptive | DATETIME | No | Physical start timestamp at check-in. Nullable|
 | `initial_condition` | Descriptive | TEXT | No | Room state at arrival. Nullable |
-| `check_out_staff_id` | FK | VARCHAR(50) | No | Reference to `User` (staff checking out). |
+| `check_out_staff_id` | FK | VARCHAR(50) | No | Reference to `User` (staff checking out). Nullable. |
 | `actual_end` | Descriptive | DATETIME | No | Physical exit timestamp at checkout. Nullable. |
 | `final_condition` | Descriptive | TEXT | No | Room state at departure. Nullable. |
 | `usage_notes` | Descriptive | TEXT | No | Post-session notes or remarks. Nullable. |
 
-### 4.7. `MaintenanceRecord` Entity
+### 4.6. `MaintenanceRecord` Entity
 | Attribute Name | Category | Data Type | Candidate Identifier | Description / Constraints |
 | :--- | :--- | :--- | :--- | :--- |
 | `maintenance_id` | PK / Identifier | INT (Identity) | Yes (Primary) | Auto-incrementing identifier. |
@@ -155,37 +148,34 @@ The attributes for each identified entity are listed below, grouped by Primary K
 The relationships established between entities are detailed below.
 
 1. **User Submits Booking (`User_Requests_Booking`)**
-   - *Participating Entities:* `User` (1) and `Booking` (0..N)
+   - *Participating Entities:* `User` (0,N) : (1,1) `Booking` 
    - *Business Meaning:* A university user submits booking requests. Each booking request belongs to exactly one requesting user.
 2. **User Approves Booking (`User_Approves_Booking`)**
-   - *Participating Entities:* `User` (0..1) and `Booking` (0..N)
+   - *Participating Entities:* `User` (0,N) : (0,1) `Booking` 
    - *Business Meaning:* A booking request is reviewed and approved/rejected by a staff member or manager (approver). A booking has at most one approver. A staff member or manager can approve multiple bookings.
 3. **Space Hosts Booking (`Space_Hosts_Booking`)**
-   - *Participating Entities:* `Space` (1) and `Booking` (0..N)
+   - *Participating Entities:* `Space` (0,N) : (1,1) `Booking`
    - *Business Meaning:* A physical space is reserved for multiple scheduled bookings. Each booking request is for exactly one physical space.
-4. **Space Contains Facility Mapping (`Space_Has_SpaceFacilities`)**
-   - *Participating Entities:* `Space` (1) and `SpaceFacility` (0..N)
+4. **Space Contains Facility Mapping (`Space_Equipped_With_Facility`)**
+   - *Participating Entities:* `Space` (1,N) : (0,N) `Facility`
    - *Business Meaning:* A physical space is linked to its inventory of equipment. Each inventory record is associated with exactly one space.
-5. **Facility Catalog Mapped to Space (`Facility_Has_SpaceFacilities`)**
-   - *Participating Entities:* `Facility` (1) and `SpaceFacility` (0..N)
-   - *Business Meaning:* A cataloged item (e.g., 'Projector') can be present in multiple spaces. Each inventory record links to exactly one cataloged item.
-6. **Booking Tracked by Usage Session (`Booking_Has_UsageSession`)**
-   - *Participating Entities:* `Booking` (1) and `UsageSession` (0..1)
+5. **Booking Tracked by Usage Session (`Booking_Has_UsageSession`)**
+   - *Participating Entities:* `Booking` (0,1) : (1,1) `UsageSession` 
    - *Business Meaning:* An approved booking has at most one physical usage session tracking actual entry and exit. A usage session corresponds to exactly one specific booking request.
-7. **User Checks In Usage Session (`User_ChecksIn_UsageSession`)**
-   - *Participating Entities:* `User` (1) and `UsageSession` (0..N)
-   - *Business Meaning:* Facility staff physically check in and complete the usage session. Each usage session must have a checking-in staff member.
-8. **User Checks Out Usage Session (`User_ChecksOut_UsageSession`)**
-   - *Participating Entities:* `User` (1) and `UsageSession` (0..N)
-   - *Business Meaning:* Facility staff physically check out and complete the usage session. Each usage session must have a checking-out staff member.
-9. **Space Requires Maintenance (`Space_Requires_Maintenance`)**
-   - *Participating Entities:* `Space` (1) and `MaintenanceRecord` (0..N)
+6. **User Checks In Usage Session (`User_ChecksIn_UsageSession`)**
+   - *Participating Entities:* `User` (0,N) : (1,1) `UsageSession`
+   - *Business Meaning:* Facility staff physically check in the usage session. Each usage session must have a checking-in staff member.
+7. **User Checks Out Usage Session (`User_ChecksOut_UsageSession`)**
+   - *Participating Entities:* `User` (0,N) : (0,1) `UsageSession`
+   - *Business Meaning:* Facility staff may check out the usage sessions. Each usage session must have at most one checking-out staff member.
+8. **Space Requires Maintenance (`Space_Requires_Maintenance`)**
+   - *Participating Entities:* `Space` (0,N) : (1,1) `MaintenanceRecord`
    - *Business Meaning:* A space can undergo multiple maintenance procedures. Each maintenance record refers to exactly one physical space.
-10. **User Reports Maintenance (`User_Reports_Maintenance`)**
-   - *Participating Entities:* `User` (1) and `MaintenanceRecord` (0..N)
+9.  **User Reports Maintenance (`User_Reports_Maintenance`)**
+   - *Participating Entities:* `User` (0,N) : (1,1) `MaintenanceRecord`
    - *Business Meaning:* Any user can report physical space problems. Each maintenance record is reported by exactly one user.
-11. **User Assigned to Maintenance (`User_Assigned_To_Maintenance`)**
-    - *Participating Entities:* `User` (0..1) and `MaintenanceRecord` (0..N)
+10. **User Assigned to Maintenance (`User_Assigned_To_Maintenance`)**
+    - *Participating Entities:* `User` (0,N) : (0,1) `MaintenanceRecord`
     - *Business Meaning:* A maintenance record can be assigned to a specific facility staff member (technician). A staff member can be assigned to multiple maintenance records.
 
 ---
@@ -194,33 +184,34 @@ The relationships established between entities are detailed below.
 
 The cardinality and participation constraints for each relationship are justified below.
 
-### 6.1. `User` to `Booking` (Requester) — **1 : 0..N**
+### 6.1. `User` to `Booking` (Requester) — **(0,N) : (1,1)**
 - **Justification:** A user (such as a newly registered student) may have submitted 0 booking requests, or can submit many (N) bookings over time. Every booking record *must* be requested by exactly 1 user (`requester_id` is mandatory). Participation is optional on the User side and mandatory on the Booking side.
 
-### 6.2. `User` to `Booking` (Approver) — **0..1 : 0..N**
+### 6.2. `User` to `Booking` (Approver) — **(0,N) : (0,1)**
 - **Justification:** A booking in the `'Pending'` state does not have an approver yet (0). Once processed, it is reviewed by exactly 1 staff member or manager. A facility staff member or manager can approve 0 or many bookings. Participation is optional on both sides (`approver_id` is nullable).
 
-### 6.3. `Space` to `Booking` — **1 : 0..N**
+### 6.3. `Space` to `Booking` — **(0,N) : (1,1)**
 - **Justification:** A physical space (e.g., a newly configured classroom) can have 0 bookings initially, or can host many (N) bookings. Every booking request must specify exactly 1 physical space (`space_code` is mandatory). Participation is optional on the Space side and mandatory on the Booking side.
 
-### 6.4. `Space` to `Facility` (via `SpaceFacility`) — **M : N**
-- **Justification:** A space can contain multiple facilities, and a specific facility catalog type can be equipped in multiple spaces. This is implemented via the associative entity `SpaceFacility`.
-  - `Space` to `SpaceFacility` is **1 : 0..N** (A space has 0 or more physical facility instances mapped; each bridge row links to exactly 1 space).
-  - `Facility` to `SpaceFacility` is **1 : 0..N** (A facility catalog item can be mapped to 0 or more rooms; each bridge row links to exactly 1 facility type).
+### 6.4. `Space` to `Facility` (via `SpaceFacility`) — **(1,M) : (0,N)**
+- **Justification:** A space can contain at least one (1) or multiple (N) facilities. A facility type may be installed in multiple (N) spaces, but may also exist in the facility catalog without currently being assigned to any space (0).
 
-### 6.5. `Booking` to `UsageSession` — **1 : 0..1**
+### 6.5. `Booking` to `UsageSession` — **(0,1) : (1,1)**
 - **Justification:** A booking request in `'Pending'`, `'Rejected'`, or `'Cancelled'` states will have 0 actual usage sessions. If approved and checked in, it will have exactly 1 usage session. A usage session cannot exist without a valid booking. Therefore, participation is optional on the Booking side, and mandatory on the UsageSession side. This represents a 1-to-1 relationship with the primary key `booking_id` as a foreign key.
 
-### 6.6. `User` to `UsageSession` (Staff) — **1 : 0..N**
+### 6.6. `User` to `UsageSession` (Check-in Staff) — **(0,N) : (1,1)**
 - **Justification:** A facility staff member can check in or check out 0 or many actual usage sessions. Every usage session must be physically checked in by exactly 1 staff member (`check_in_staff_id` is mandatory). Participation is optional on the User side and mandatory on the UsageSession side.
 
-### 6.7. `Space` to `MaintenanceRecord` — **1 : 0..N**
+### 6.7. `User` to `UsageSession` (Check-out Staff) — **(0,N) : (0,1)**
+- **Justification:** A facility staff member can check out and complete 0 or many usage sessions. A usage session may be completed by at most 1 staff member (`completed_by_staff_id`). However, ongoing sessions that have not yet ended may not have a checking-out staff member recorded. Therefore, participation is optional on both the User side and the UsageSession side.
+
+### 6.8. `Space` to `MaintenanceRecord` — **(0,N) : (1,1)**
 - **Justification:** A physical space may have had 0 maintenance activities, or can have many (N) reported problems over its lifespan. Each maintenance record must belong to exactly 1 space (`space_code` is mandatory). Participation is optional on the Space side and mandatory on the Maintenance Record side.
 
-### 6.8. `User` to `MaintenanceRecord` (Reporter) — **1 : 0..N**
+### 6.9. `User` to `MaintenanceRecord` (Reporter) — **(0,N) : (0,1)**
 - **Justification:** A user (student, lecturer, or staff) can report 0 or many maintenance issues. Every maintenance record must be submitted by exactly 1 reporting user (`reporter_id` is mandatory). Participation is optional on the User side and mandatory on the Maintenance Record side.
 
-### 6.9. `User` to `MaintenanceRecord` (Assigned Staff) — **0..1 : 0..N**
+### 6.10. `User` to `MaintenanceRecord` (Assigned Staff) — **(0,N) : (1,1)**
 - **Justification:** When a problem is newly reported, it might not be assigned to a technician immediately (0). Once assigned, it is handled by exactly 1 facility staff member. A technician can be assigned to 0 or many maintenance records. Participation is optional on both sides (`assigned_staff_id` is nullable).
 
 ---
@@ -281,7 +272,7 @@ The following operational and data design assumptions are defined to supplement 
 4. **Maintenance Blocking Mechanics:** If a space has an active/approved maintenance record, its status should be set to `'Under Maintenance'`, and no new booking requests can overlap with that maintenance timeframe.
 5. **Soft Deletion Policy:** To preserve historical booking and maintenance records, rows in `User` and `Space` are never physically deleted. Instead, they are soft-deleted by setting `User.account_status = 'Inactive'` and `Space.current_status = 'Retired'`.
 6. **Time Order Constraint:** Booking requested start must be strictly before requested end (`requested_end > requested_start`). Similarly, actual start must be strictly before actual end, and maintenance start must be before completion.
-
+7. **Facility Catalog and Space Inventory:** The system stores facility types (e.g., Projector, Whiteboard, Microphone) as entries in a facility catalog rather than tracking individual physical equipment items. 
 ---
 
 ## 9. Open Questions
