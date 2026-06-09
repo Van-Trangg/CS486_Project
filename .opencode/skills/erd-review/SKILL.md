@@ -24,15 +24,9 @@ Both documents must be loaded and fully read before any review begins:
 | Input | File | Role |
 |---|---|---|
 | Ground truth | `outputs/01-business-requirement-analysis-G02.md` | What the ERD must represent |
-| Subject under review | `outputs/02-erd-design-G02.md` | What the ERD actually represents |
+| Subject under review | `docs/02-erd-design-G02.md` | What the ERD actually represents |
 
 If either file is absent, halt and request it.
-
-Create or update:
-
-`docs\02-erd-design-review-G02.md`
-
-Do not skip this file.
 
 ---
 
@@ -71,7 +65,7 @@ For each entity, compare BRA §4 attributes against ERD attributes line by line:
 | 2a. No omissions | Every BRA §4 attribute appears in the correct ERD entity block |
 | 2b. No inventions | No attribute in ERD is absent from BRA §4 |
 | 2c. Name fidelity | Attribute names match BRA exactly (no abbreviations, renames, or case changes) |
-| 2d. Type accuracy | Mermaid type tokens correctly reflect BRA data types per the SKILL-02 translation table |
+| 2d. Type fidelity | Every attribute's type token in the ERD matches the BRA §4 data type **verbatim** (e.g., `VARCHAR(50)`, `INT`, `DATETIME`, `NVARCHAR(MAX)`, `INT(Identity)`). Generic aliases such as `string`, `text`, `int`, or `datetime` are WRONG and must be flagged as FAIL. |
 | 2e. PK labelling | PK attributes carry the `PK` suffix; the shared key `UsageSession.booking_id` carries `PK, FK` |
 | 2f. FK exclusion | FK-only columns (e.g., `requester_id`, `space_code` in Booking) do not appear as attributes in the Mermaid block |
 
@@ -124,8 +118,10 @@ Expected relationships (from BRA §5):
 ### Check 4 — Cardinality Fidelity
 
 **Procedure:**
-For each relationship line in the ERD, decode the Mermaid crow's-foot tokens back to
-(min,max) notation and compare against BRA §6.
+For each relationship line in the ERD, **explicitly decode** the Mermaid crow's-foot tokens
+back to (min,max) notation and compare against BRA §6. This check must be performed
+mechanically, token by token — it must not be done by impression or by re-reading the
+label. The reviewer must write out the decoded values for every relationship.
 
 **Decoding reference:**
 
@@ -136,23 +132,47 @@ For each relationship line in the ERD, decode the Mermaid crow's-foot tokens bac
 | `\|{` | (1,N) — one or many |
 | `o{` | (0,N) — zero or many |
 
-For each relationship, record:
-- BRA §6 cardinality for Entity A side
-- BRA §6 cardinality for Entity B side
-- ERD decoded cardinality for Entity A side
-- ERD decoded cardinality for Entity B side
-- Match: YES / NO
+**Critical direction rule:** In a Mermaid relationship line of the form
+`ENTITY_A token--token ENTITY_B`, the **left token** describes the cardinality of
+**ENTITY_A** as seen from ENTITY_B's perspective (i.e., how many A's relate to one B),
+and the **right token** describes the cardinality of **ENTITY_B** as seen from ENTITY_A's
+perspective (i.e., how many B's relate to one A). Specifically:
 
-**Pass condition:** All cardinalities match BRA §6 exactly.
+- Left side of `--`: the token immediately to the left of `--` is the ENTITY_A cardinality.
+- Right side of `--`: the token immediately to the right of `--` is the ENTITY_B cardinality.
+
+Example: `USER ||--o{ BOOKING` → USER side = `||` = (1,1); BOOKING side = `o{` = (0,N).
+This means: every Booking must have exactly 1 User; a User may have 0-or-many Bookings.
+Compare against BRA §6: User (0,N) : Booking (1,1) — **this would be a mismatch and must be flagged**.
+
+The reviewer must produce the following table for all 10 relationships before issuing a result:
+
+| # | Relationship | ERD left token | ERD Entity A decoded | BRA Entity A | Match? | ERD right token | ERD Entity B decoded | BRA Entity B | Match? |
+|---|---|---|---|---|---|---|---|---|---|
+| 5.1 | USER→BOOKING (requests) | | | (0,N) | | | | (1,1) | |
+| 5.2 | USER→BOOKING (approves) | | | (0,N) | | | | (0,1) | |
+| 5.3 | SPACE→BOOKING (hosts) | | | (0,N) | | | | (1,1) | |
+| 5.4 | SPACE→FACILITY (equipped) | | | (0,N) | | | | (0,N) | |
+| 5.5 | BOOKING→USAGESESSION | | | (0,1) | | | | (1,1) | |
+| 5.6 | USER→USAGESESSION (checks in) | | | (0,N) | | | | (1,1) | |
+| 5.7 | USER→USAGESESSION (checks out) | | | (0,N) | | | | (0,1) | |
+| 5.8 | SPACE→MAINTENANCERECORD | | | (0,N) | | | | (1,1) | |
+| 5.9 | USER→MAINTENANCERECORD (reports) | | | (0,N) | | | | (1,1) | |
+| 5.10 | USER→MAINTENANCERECORD (assigned) | | | (0,N) | | | | (0,1) | |
+
+Any row with a NO in either Match column is a FAIL for this check.
+
+**Pass condition:** All 20 cardinality comparisons (2 per relationship × 10 relationships) match BRA §6.
 
 **High-risk relationships to check carefully:**
 
 | Relationship | BRA §6 | Common mistake |
 |---|---|---|
-| Space↔Facility (5.4) | (0,M):(0,N) — both optional | Drawing Space side as (1,N) — mandatory |
+| Space↔Facility (5.4) | (0,N):(0,N) — both optional | Drawing Space side as (1,N) — mandatory |
 | Booking↔UsageSession (5.5) | (0,1):(1,1) — Booking optional, Session mandatory | Reversing the mandatory side |
 | User→Booking approver (5.2) | (0,N):(0,1) — both optional | Making Booking side mandatory |
 | User→UsageSession check-out (5.7) | (0,N):(0,1) — both optional | Making UsageSession side mandatory |
+| Any 1:N relationship | Entity A side should be (0,N) or (1,N) | **Direction reversal** — swapping which entity is the "many" side is the most common error and must be explicitly decoded, never assumed |
 
 ---
 
@@ -174,21 +194,29 @@ For each Mermaid relationship line, check that:
 
 ---
 
-### Check 6 — Mermaid Syntax Validity
+### Check 6 — Mermaid Syntax and Formatting Validity
 
 **Procedure:**
-Parse the Mermaid block for the following common syntax errors:
+Parse the Mermaid block for the following syntax errors and formatting violations:
 
-| Syntax rule | What to check |
+| Rule | What to check |
 |---|---|
-| Entity names | Single token, no spaces |
-| Attribute declarations | Type before name (e.g., `string user_id PK`) |
-| PK/FK suffixes | Space-separated after name: `int booking_id PK, FK` |
-| Relationship lines | Both sides have tokens, colon present, label in quotes |
-| Comments | Begin with `%%` |
+| Entity names | Single token, no spaces (e.g., `USAGESESSION` not `USAGE SESSION`) |
+| Attribute declarations | Type before name (e.g., `VARCHAR(50) user_id PK`) |
+| Type verbatim | Types are BRA-exact, not generic aliases (covered in Check 2d; flag here too if found) |
+| PK/FK suffixes | Space-separated after name: `INT booking_id PK, FK` |
+| Relationship lines | Both sides have tokens, `--` separator present, colon present, label in quotes |
 | No illegal characters | No special characters in entity/attribute names except `_` |
+| **Inline comment prohibition — attributes** | No `%%` comment may appear on the same line as an attribute declaration. Any `%% Nullable`, `%% optional`, or any other annotation on an attribute line is a FAIL. Nullable status belongs in the Attribute Traceability table only. |
+| **Inline comment prohibition — relationships** | No `%%` comment may appear on the same line as a relationship line (e.g., `USER \|\|--o{ BOOKING : "requests" %% BRA §5.1` is a FAIL). BRA source citations must be on their own preceding `%%` comment line. |
+| **Comment placement** | Every `%%` comment must occupy its own dedicated line. A comment line must not contain a relationship or attribute declaration. |
 
-**Pass condition:** No syntax errors detected.
+**Pass condition:** No syntax errors and no formatting violations detected. Any inline comment
+on an attribute or relationship line is an automatic FAIL for this check.
+
+**Common failure pattern:** The agent may annotate nullable attributes with `%% Nullable`
+inline and relationship lines with `%% BRA §5.X` inline. Both are explicit violations of the
+design skill formatting rules and must be flagged.
 
 ---
 
@@ -213,6 +241,23 @@ Key rules with structural implications:
 | Rule 19 (Capacity Limit) | `Space` has `capacity`; `Booking` has `expected_participants` |
 
 **Pass condition:** All rules with structural implications are satisfied by the ERD.
+
+---
+
+### Check 8 — Design Decisions Prose Accuracy
+
+**Procedure:**
+Read the §1 Design Decisions section of the ERD output document and verify the following:
+
+| Sub-check | What to verify |
+|---|---|
+| 8a. No Chen reference | The prose must not claim the ERD uses "Chen notation" or "Chen-style" anything. Mermaid `erDiagram` renders crow's foot exclusively. Any Chen reference is factually wrong and must be flagged as FAIL. |
+| 8b. Notation correctly named | The ERD notation must be described as "crow's foot notation" rendered via Mermaid `erDiagram`. |
+| 8c. Multi-role representation described | The section must explain how multi-role User relationships (requester/approver, check-in/check-out, reporter/assigned) are handled as separate labeled lines. |
+| 8d. M:N Space↔Facility described | The section must state that the M:N relationship is rendered as a direct line and that the junction table is deferred to Step 3. |
+| 8e. No false claims | The section must not make technically incorrect statements about Mermaid's capabilities or the ERD's notation. |
+
+**Pass condition:** All sub-checks pass. Any Chen notation reference is an automatic FAIL.
 
 ---
 
@@ -242,8 +287,9 @@ Produce the review report as a Markdown file with this structure:
 | 3 | Relationship Completeness | PASS/WARN/FAIL | <count> issues |
 | 4 | Cardinality Fidelity | PASS/WARN/FAIL | <count> issues |
 | 5 | Relationship Label Quality | PASS/WARN/FAIL | <count> issues |
-| 6 | Mermaid Syntax Validity | PASS/WARN/FAIL | <count> issues |
+| 6 | Mermaid Syntax & Formatting | PASS/WARN/FAIL | <count> issues |
 | 7 | Business Rule Traceability | PASS/WARN/FAIL | <count> issues |
+| 8 | Design Decisions Prose Accuracy | PASS/WARN/FAIL | <count> issues |
 
 ---
 
@@ -274,7 +320,7 @@ Produce the review report as a Markdown file with this structure:
 <If none: state "None.">
 ```
 
-Save output as: `02-erd-review-G<Group number>.md`
+Save output in: `docs/02-erd-design-review-G02.md`
 
 ---
 
@@ -282,14 +328,19 @@ Save output as: `02-erd-review-G<Group number>.md`
 
 | Verdict | Condition |
 |---|---|
-| **APPROVED** | All 7 checks PASS. No issues of any severity. |
+| **APPROVED** | All 8 checks PASS. No issues of any severity. |
 | **APPROVED WITH MINOR ISSUES** | All checks PASS or WARN. Zero FAIL results. Zero BLOCKING issues. Advisory issues documented. |
 | **REQUIRES REVISION** | Any check returns FAIL, OR any BLOCKING issue is found regardless of check result. ERD must be corrected and re-reviewed before Step 3. |
 
 If the verdict is REQUIRES REVISION, the agent must:
 1. List every blocking issue clearly.
 2. Produce a corrected Mermaid block with all blocking issues resolved.
-3. Re-run checks 1–7 on the corrected block and confirm all blocking issues are resolved.
+3. Re-run checks 1–8 on the corrected block and confirm all blocking issues are resolved.
+
+**Anti-rubber-stamp rule:** An APPROVED verdict is only valid if the reviewer has
+explicitly shown its work for Check 4 (the full 10-row decoding table must be present in the
+report) and has read every attribute in every entity block for Check 2. A verdict issued
+without the Check 4 decoding table present is invalid and must be rejected.
 
 ---
 

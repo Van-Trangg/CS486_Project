@@ -1,177 +1,180 @@
-# Step 2: ERD Design — Campus Space Management System
-
----
+# 02-erd-design-G02.md
 
 ## 1. Design Decisions
-
-For the Campus Space Management System, the Entity-Relationship Diagram (ERD) is rendered using Mermaid's `erDiagram` syntax, which natively supports Chen-style cardinality and crow's-foot notation. Entities were mapped strictly from §3 of the Business Requirement Analysis (BRA), and attributes were assigned based on §4, applying appropriate nullability and data types.
-
-Multi-role relationships, where a `User` participates in distinct roles with the same entity (e.g., `Booking`, `UsageSession`, `MaintenanceRecord`), are represented as separate, labeled relationship lines to maintain clarity and adhere to the strict participation requirements. The M:N relationship between `Space` and `Facility` is represented as a direct relationship line in this logical design, as supported by Mermaid, deferring the junction entity implementation to Step 3.
-
----
+This ERD maps the entities and relationships required for the Campus Space Management System. The design reflects a centralized system tracking users, space management, booking, usage tracking, and maintenance. To handle the M:N relationship between `Space` and `Facility` without introducing junction entities, we define a direct relationship as requested. All entities include primary keys as defined in the Business Requirement Analysis, with foreign key relationships enforcing referential integrity.
 
 ## 2. Entity-Relationship Diagram
 
 ```mermaid
 erDiagram
+    %% Relationships sourced from §5 of BRA
+    USER o{--|| BOOKING : "submits"
+    USER o{--o| BOOKING : "approves"
+    SPACE o{--|| BOOKING : "hosts"
+    SPACE }o--o{ FACILITY : "contains"
+    BOOKING ||--|o USAGESESSION : "tracked by"
+    USER o{--|| USAGESESSION : "checks in"
+    USER o{--o| USAGESESSION : "checks out"
+    SPACE o{--|| MAINTENANCERECORD : "requires"
+    USER o{--|| MAINTENANCERECORD : "reports"
+    USER o{--o| MAINTENANCERECORD : "assigned to"
 
-    %% ── Entities ──────────────────────────────────────────────
     USER {
-        string user_id PK
-        string email
-        string full_name
-        string phone_number %% Nullable
-        string role
-        string department
-        string account_status
+        VARCHAR(50) user_id PK
+        VARCHAR(150) email
+        VARCHAR(150) full_name
+        VARCHAR(20) phone_number
+        VARCHAR(50) role
+        VARCHAR(100) department
+        VARCHAR(20) account_status
     }
 
     SPACE {
-        string space_code PK
-        string space_name
-        string space_type
-        string building
-        string floor
-        string room_number
-        int capacity
-        string current_status
-        text usage_policy
+        VARCHAR(50) space_code PK
+        VARCHAR(100) space_name
+        VARCHAR(50) space_type
+        VARCHAR(50) building
+        VARCHAR(10) floor
+        VARCHAR(20) room_number
+        INT capacity
+        VARCHAR(20) current_status
+        NVARCHAR(MAX) usage_policy
     }
 
     FACILITY {
-        int facility_id PK
-        string facility_name
-        text facility_description %% Nullable
+        INT facility_id PK
+        VARCHAR(100) facility_name
+        NVARCHAR(MAX) facility_description
     }
 
     BOOKING {
-        int booking_id PK
-        datetime requested_start
-        datetime requested_end
-        string purpose
-        int expected_participants
-        string booking_status
-        datetime created_at
-        datetime decision_time %% Nullable
-        text decision_note %% Nullable
-        string rejection_reason %% Nullable
+        INT booking_id PK
+        VARCHAR(50) space_code FK
+        VARCHAR(50) requester_id FK
+        DATETIME requested_start
+        DATETIME requested_end
+        VARCHAR(100) purpose
+        INT expected_participants
+        VARCHAR(30) booking_status
+        DATETIME created_at
+        VARCHAR(50) approver_id FK
+        DATETIME decision_time
+        NVARCHAR(MAX) decision_note
+        VARCHAR(255) rejection_reason
     }
 
     USAGESESSION {
-        int booking_id PK, FK
-        datetime actual_start
-        text initial_condition
-        datetime actual_end %% Nullable
-        text final_condition %% Nullable
-        text usage_notes %% Nullable
+        INT booking_id PK, FK
+        VARCHAR(50) check_in_staff_id FK
+        DATETIME actual_start
+        NVARCHAR(MAX) initial_condition
+        VARCHAR(50) check_out_staff_id FK
+        DATETIME actual_end
+        NVARCHAR(MAX) final_condition
+        NVARCHAR(MAX) usage_notes
     }
 
     MAINTENANCERECORD {
-        int maintenance_id PK
-        string problem_type
-        text problem_description
-        datetime start_time
-        datetime completion_time %% Nullable
-        string maintenance_status
-        text result_note %% Nullable
+        INT maintenance_id PK
+        VARCHAR(50) space_code FK
+        VARCHAR(50) reporter_id FK
+        VARCHAR(50) assigned_staff_id FK
+        VARCHAR(50) problem_type
+        NVARCHAR(MAX) problem_description
+        DATETIME start_time
+        DATETIME completion_time
+        VARCHAR(20) maintenance_status
+        NVARCHAR(MAX) result_note
     }
-
-    %% ── Relationships ─────────────────────────────────────────
-    USER ||--o{ BOOKING : "requests" %% BRA §5.1
-    USER o{--o| BOOKING : "approves" %% BRA §5.2
-    SPACE ||--o{ BOOKING : "hosts" %% BRA §5.3
-    SPACE o{--o{ FACILITY : "equipped with" %% BRA §5.4
-    BOOKING ||--|| USAGESESSION : "tracked by" %% BRA §5.5
-    USER ||--|{ USAGESESSION : "checks in" %% BRA §5.6
-    USER o|--o{ USAGESESSION : "checks out" %% BRA §5.7
-    SPACE ||--o{ MAINTENANCERECORD : "requires" %% BRA §5.8
-    USER ||--o{ MAINTENANCERECORD : "reports" %% BRA §5.9
-    USER o|--o{ MAINTENANCERECORD : "assigned to" %% BRA §5.10
 ```
-
----
 
 ## 3. Relationship Summary Table
 
-| # | Relationship Name | Entity A | Cardinality | Entity B | Notes |
-|---|---|---|---|---|---|
-| 1 | requests | User | (0,N) : (1,1) | Booking | - |
-| 2 | approves | User | (0,N) : (0,1) | Booking | - |
-| 3 | hosts | Space | (0,N) : (1,1) | Booking | - |
-| 4 | equipped with | Space | (0,M) : (0,N) | Facility | M:N relationship |
-| 5 | tracked by | Booking | (0,1) : (1,1) | UsageSession | - |
-| 6 | checks in | User | (0,N) : (1,1) | UsageSession | - |
-| 7 | checks out | User | (0,N) : (0,1) | UsageSession | - |
-| 8 | requires | Space | (0,N) : (1,1) | MaintenanceRecord | - |
-| 9 | reports | User | (0,N) : (1,1) | MaintenanceRecord | - |
-| 10 | assigned to | User | (0,N) : (0,1) | MaintenanceRecord | - |
-
----
+| Relationship | Entities | Cardinality | Participation | Source BRA § |
+| :--- | :--- | :--- | :--- | :--- |
+| User_Requests_Booking | USER:BOOKING | (0,N):(1,1) | Optional:Mandatory | 5.1 |
+| User_Approves_Booking | USER:BOOKING | (0,N):(0,1) | Optional:Optional | 5.2 |
+| Space_Hosts_Booking | SPACE:BOOKING | (0,N):(1,1) | Optional:Mandatory | 5.3 |
+| Space_Equipped_With_Facility | SPACE:FACILITY | (0,M):(0,N) | Optional:Optional | 5.4 |
+| Booking_Has_UsageSession | BOOKING:USAGESESSION | (0,1):(1,1) | Optional:Mandatory | 5.5 |
+| User_ChecksIn_UsageSession | USER:USAGESESSION | (0,N):(1,1) | Optional:Mandatory | 5.6 |
+| User_ChecksOut_UsageSession | USER:USAGESESSION | (0,N):(0,1) | Optional:Optional | 5.7 |
+| Space_Requires_Maintenance | SPACE:MAINTENANCERECORD | (0,N):(1,1) | Optional:Mandatory | 5.8 |
+| User_Reports_Maintenance | USER:MAINTENANCERECORD | (0,N):(1,1) | Optional:Mandatory | 5.9 |
+| User_Assigned_To_Maintenance | USER:MAINTENANCERECORD | (0,N):(0,1) | Optional:Optional | 5.10 |
 
 ## 4. Attribute Traceability
 
-### User Entity
-| Attribute | BRA Source |
-|---|---|
-| `user_id` | §4.1 |
-| `email` | §4.1 |
-| `full_name` | §4.1 |
-| `phone_number` | §4.1 |
-| `role` | §4.1 |
-| `department` | §4.1 |
-| `account_status` | §4.1 |
+### 4.1. USER
+| Attribute | PK/FK | Nullable | Data Type | Source |
+| :--- | :--- | :--- | :--- | :--- |
+| user_id | PK | No | VARCHAR(50) | BRA 4.1 |
+| email | - | No | VARCHAR(150) | BRA 4.1 |
+| full_name | - | No | VARCHAR(150) | BRA 4.1 |
+| phone_number | - | Yes | VARCHAR(20) | BRA 4.1 |
+| role | - | No | VARCHAR(50) | BRA 4.1 |
+| department | - | No | VARCHAR(100) | BRA 4.1 |
+| account_status | - | No | VARCHAR(20) | BRA 4.1 |
 
-### Space Entity
-| Attribute | BRA Source |
-|---|---|
-| `space_code` | §4.2 |
-| `space_name` | §4.2 |
-| `space_type` | §4.2 |
-| `building` | §4.2 |
-| `floor` | §4.2 |
-| `room_number` | §4.2 |
-| `capacity` | §4.2 |
-| `current_status` | §4.2 |
-| `usage_policy` | §4.2 |
+### 4.2. SPACE
+| Attribute | PK/FK | Nullable | Data Type | Source |
+| :--- | :--- | :--- | :--- | :--- |
+| space_code | PK | No | VARCHAR(50) | BRA 4.2 |
+| space_name | - | No | VARCHAR(100) | BRA 4.2 |
+| space_type | - | No | VARCHAR(50) | BRA 4.2 |
+| building | - | No | VARCHAR(50) | BRA 4.2 |
+| floor | - | No | VARCHAR(10) | BRA 4.2 |
+| room_number | - | No | VARCHAR(20) | BRA 4.2 |
+| capacity | - | No | INT | BRA 4.2 |
+| current_status | - | No | VARCHAR(20) | BRA 4.2 |
+| usage_policy | - | No | NVARCHAR(MAX) | BRA 4.2 |
 
-### Facility Entity
-| Attribute | BRA Source |
-|---|---|
-| `facility_id` | §4.3 |
-| `facility_name` | §4.3 |
-| `facility_description` | §4.3 |
+### 4.3. FACILITY
+| Attribute | PK/FK | Nullable | Data Type | Source |
+| :--- | :--- | :--- | :--- | :--- |
+| facility_id | PK | No | INT | BRA 4.3 |
+| facility_name | - | No | VARCHAR(100) | BRA 4.3 |
+| facility_description | - | No | NVARCHAR(MAX) | BRA 4.3 |
 
-### Booking Entity
-| Attribute | BRA Source |
-|---|---|
-| `booking_id` | §4.4 |
-| `requested_start` | §4.4 |
-| `requested_end` | §4.4 |
-| `purpose` | §4.4 |
-| `expected_participants` | §4.4 |
-| `booking_status` | §4.4 |
-| `created_at` | §4.4 |
-| `decision_time` | §4.4 |
-| `decision_note` | §4.4 |
-| `rejection_reason` | §4.4 |
+### 4.4. BOOKING
+| Attribute | PK/FK | Nullable | Data Type | Source |
+| :--- | :--- | :--- | :--- | :--- |
+| booking_id | PK | No | INT | BRA 4.4 |
+| space_code | FK | No | VARCHAR(50) | BRA 4.4 |
+| requester_id | FK | No | VARCHAR(50) | BRA 4.4 |
+| requested_start | - | No | DATETIME | BRA 4.4 |
+| requested_end | - | No | DATETIME | BRA 4.4 |
+| purpose | - | No | VARCHAR(100) | BRA 4.4 |
+| expected_participants| - | No | INT | BRA 4.4 |
+| booking_status | - | No | VARCHAR(30) | BRA 4.4 |
+| created_at | - | No | DATETIME | BRA 4.4 |
+| approver_id | FK | Yes | VARCHAR(50) | BRA 4.4 |
+| decision_time | - | Yes | DATETIME | BRA 4.4 |
+| decision_note | - | Yes | NVARCHAR(MAX) | BRA 4.4 |
+| rejection_reason | - | Yes | VARCHAR(255) | BRA 4.4 |
 
-### UsageSession Entity
-| Attribute | BRA Source |
-|---|---|
-| `booking_id` | §4.5 |
-| `actual_start` | §4.5 |
-| `initial_condition` | §4.5 |
-| `actual_end` | §4.5 |
-| `final_condition` | §4.5 |
-| `usage_notes` | §4.5 |
+### 4.5. USAGESESSION
+| Attribute | PK/FK | Nullable | Data Type | Source |
+| :--- | :--- | :--- | :--- | :--- |
+| booking_id | PK, FK | No | INT | BRA 4.5 |
+| check_in_staff_id | FK | No | VARCHAR(50) | BRA 4.5 |
+| actual_start | - | No | DATETIME | BRA 4.5 |
+| initial_condition | - | No | NVARCHAR(MAX) | BRA 4.5 |
+| check_out_staff_id | FK | Yes | VARCHAR(50) | BRA 4.5 |
+| actual_end | - | Yes | DATETIME | BRA 4.5 |
+| final_condition | - | Yes | NVARCHAR(MAX) | BRA 4.5 |
+| usage_notes | - | Yes | NVARCHAR(MAX) | BRA 4.5 |
 
-### MaintenanceRecord Entity
-| Attribute | BRA Source |
-|---|---|
-| `maintenance_id` | §4.6 |
-| `problem_type` | §4.6 |
-| `problem_description` | §4.6 |
-| `start_time` | §4.6 |
-| `completion_time` | §4.6 |
-| `maintenance_status` | §4.6 |
-| `result_note` | §4.6 |
+### 4.6. MAINTENANCERECORD
+| Attribute | PK/FK | Nullable | Data Type | Source |
+| :--- | :--- | :--- | :--- | :--- |
+| maintenance_id | PK | No | INT | BRA 4.6 |
+| space_code | FK | No | VARCHAR(50) | BRA 4.6 |
+| reporter_id | FK | No | VARCHAR(50) | BRA 4.6 |
+| assigned_staff_id | FK | Yes | VARCHAR(50) | BRA 4.6 |
+| problem_type | - | No | VARCHAR(50) | BRA 4.6 |
+| problem_description | - | No | NVARCHAR(MAX) | BRA 4.6 |
+| start_time | - | No | DATETIME | BRA 4.6 |
+| completion_time | - | Yes | DATETIME | BRA 4.6 |
+| maintenance_status | - | No | VARCHAR(20) | BRA 4.6 |
+| result_note | - | Yes | NVARCHAR(MAX) | BRA 4.6 |

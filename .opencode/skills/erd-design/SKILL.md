@@ -1,12 +1,12 @@
 ---
 name: erd-design
-description: This skill instructs the agent to produce a complete, faithful Entity-Relationship Diagram (ERD) in Chen notation for the Campus Space Management System, rendered as Mermaid code. The ERD must be derived exclusively from the approved Step 1 Business Requirement Analysis document.
+description: This skill instructs the agent to produce a complete, faithful Entity-Relationship Diagram (ERD) in crow's foot notation for the Campus Space Management System, rendered as Mermaid code. The ERD must be derived exclusively from the approved Step 1 Business Requirement Analysis document.
 compatibility: opencode
 -----------------------
 
 ## 1. Purpose
 
-This skill instructs the agent to produce a complete, faithful Entity-Relationship Diagram
+This skill instructs the agent to produce a complete, faithful Entity-Relationship Diagram 
 (ERD) in Chen notation for the Campus Space Management System, rendered as Mermaid
 `erDiagram` code. The ERD must be derived exclusively from the approved Step 1 Business
 Requirement Analysis document (`01-business-requirement-analysis-G02.md`). No
@@ -56,12 +56,12 @@ following classification rules:
 | PK / FK (shared key) | `PK, FK` | Never |
 | FK only | `FK` | Per BRA |
 | Descriptive, not nullable | *(no suffix)* | No |
-| Descriptive, nullable | *(no suffix)* | Yes — annotate in comment |
+| Descriptive, nullable | *(no suffix)* | Yes — noted in Attribute Traceability table only |
 
 Rules:
-- Map each BRA data type to a clean Mermaid-compatible type token:
-  `VARCHAR(n)` → `string`, `INT` → `int`, `DATETIME` → `datetime`,
-  `NVARCHAR(MAX)` → `text`.
+- Preserve BRA data types exactly as written (e.g., `VARCHAR(50)`, `INT`, `DATETIME`,
+  `NVARCHAR(MAX)`). Do not translate or shorten them. The full type names are retained
+  so they can be used directly in SQL DDL at Step 5 without ambiguity.
 - Do not include FK columns as attributes in Mermaid `erDiagram` syntax — relationships
   are expressed via relationship lines, not repeated FK columns.
   Exception: `UsageSession.booking_id` is both PK and FK — include it with label `PK, FK`.
@@ -143,7 +143,9 @@ Formatting rules:
 - Attribute names in `snake_case`, matching BRA exactly.
 - One attribute per line, indented 8 spaces inside the entity block.
 - Relationship lines in the order they appear in §5 of the BRA.
-- Each relationship line followed by an inline comment `%% BRA §5.X` citing its source.
+- Each relationship line must be preceded by a `%%` comment on its own separate line
+  citing the BRA source (e.g., `%% BRA §5.1 — User_Requests_Booking`). The comment
+  must never appear on the same line as a relationship or attribute declaration.
 - No fabricated attributes, entities, or relationships.
 
 ### Stage 5 — Self-Consistency Pre-Check
@@ -177,7 +179,7 @@ Produce the output as a Markdown file with the following structure:
 ## 1. Design Decisions
 
 <A short paragraph (4–6 sentences) explaining:>
-- Which ERD notation is used and why (Chen, rendered via Mermaid erDiagram)
+- Which ERD notation is used and why (crow's foot, rendered via Mermaid erDiagram)
 - How multi-role User relationships are represented
 - How the M:N Space↔Facility relationship is represented
 - Where the SpaceFacility junction will appear (Step 3 logical design)
@@ -203,7 +205,7 @@ Produce the output as a Markdown file with the following structure:
 <One sub-table per entity listing every attribute and its BRA §4 source>
 ```
 
-Save output as: `02-erd-design-G<Group number>.md`
+Save output as: `02-erd-design-G02.md`
 
 ---
 
@@ -235,12 +237,15 @@ These rules are absolute and override any other instruction:
 
 - Entity names must be a single token (no spaces). Use `USAGESESSION`, not
   `USAGE SESSION`.
-- Attribute type must precede attribute name: `string user_id PK`
+- Attribute type must precede attribute name: `VARCHAR(50) user_id PK`
+- Data types with parentheses (e.g., `VARCHAR(50)`, `NVARCHAR(MAX)`) are valid in
+  Mermaid `erDiagram` and must be written exactly as they appear in the BRA.
 - Relationship label string is mandatory: the trailing `"label"` after the colon is required
   by Mermaid's parser. Empty strings `""` are allowed but discouraged — use a
   meaningful verb phrase.
 - Both `o|`, `||`, `o{`, `|{` are valid crow's-foot tokens. Use `}` on the right side
   of a many-end: `||--o{` means "exactly one to zero-or-many".
-- Comments use `%%` prefix.
+- Comments use `%%` prefix and must always occupy their own dedicated line. Never
+  place a `%%` comment on the same line as an attribute declaration or relationship line.
 - Mermaid does not support composite or multi-valued attributes natively — document
   any such cases in the Design Decisions section instead of attempting to encode them.
