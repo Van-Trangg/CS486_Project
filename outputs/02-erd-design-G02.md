@@ -44,12 +44,15 @@ erDiagram
 
     BOOKING {
         INT booking_id PK
+        VARCHAR(50) space_code FK
+        VARCHAR(50) requester_id FK
         DATETIME requested_start
         DATETIME requested_end
         VARCHAR(100) purpose
         INT expected_participants
         VARCHAR(30) booking_status
         DATETIME created_at
+        VARCHAR(50) approver_id FK
         DATETIME decision_time
         NVARCHAR(MAX) decision_note
         VARCHAR(255) rejection_reason
@@ -57,8 +60,10 @@ erDiagram
 
     USAGESESSION {
         INT booking_id PK, FK
+        VARCHAR(50) check_in_staff_id FK
         DATETIME actual_start
         NVARCHAR(MAX) initial_condition
+        VARCHAR(50) check_out_staff_id FK
         DATETIME actual_end
         NVARCHAR(MAX) final_condition
         NVARCHAR(MAX) usage_notes
@@ -66,6 +71,9 @@ erDiagram
 
     MAINTENANCERECORD {
         INT maintenance_id PK
+        VARCHAR(50) space_code FK
+        VARCHAR(50) reporter_id FK
+        VARCHAR(50) assigned_staff_id FK
         VARCHAR(50) problem_type
         NVARCHAR(MAX) problem_description
         DATETIME start_time
@@ -76,110 +84,23 @@ erDiagram
 
     %% ── Relationships ─────────────────────────────────────────
     %% BRA §5.1 — User_Requests_Booking
-    USER o|--o{ BOOKING : "requests"
+    USER o{--|| BOOKING : "requests"
     %% BRA §5.2 — User_Approves_Booking
-    USER o|--o{ BOOKING : "approves"
+    USER o{--o| BOOKING : "approves"
     %% BRA §5.3 — Space_Hosts_Booking
     SPACE ||--o{ BOOKING : "hosts"
     %% BRA §5.4 — Space_Equipped_With_Facility
     SPACE o{--o{ FACILITY : "equipped with"
     %% BRA §5.5 — Booking_Has_UsageSession
-    BOOKING ||--|| USAGESESSION : "tracked by"
+    BOOKING o|--|| USAGESESSION : "tracked by"
     %% BRA §5.6 — User_ChecksIn_UsageSession
-    USER ||--o{ USAGESESSION : "checks in"
+    USER o{--|| USAGESESSION : "checks in"
     %% BRA §5.7 — User_ChecksOut_UsageSession
-    USER o|--o{ USAGESESSION : "checks out"
+    USER o{--o| USAGESESSION : "checks out"
     %% BRA §5.8 — Space_Requires_Maintenance
     SPACE ||--o{ MAINTENANCERECORD : "requires"
     %% BRA §5.9 — User_Reports_Maintenance
-    USER ||--o{ MAINTENANCERECORD : "reports"
+    USER o{--|| MAINTENANCERECORD : "reports"
     %% BRA §5.10 — User_Assigned_To_Maintenance
-    USER o|--o{ MAINTENANCERECORD : "assigned to"
+    USER o{--o| MAINTENANCERECORD : "assigned to"
 ```
-
----
-
-## 3. Relationship Summary Table
-
-| # | Relationship Name | Entity A | Cardinality | Entity B | Notes |
-|---|---|---|---|---|---|
-| 1 | User_Requests_Booking | User | (0,N) : (1,1) | Booking | Request role |
-| 2 | User_Approves_Booking | User | (0,N) : (0,1) | Booking | Approver role |
-| 3 | Space_Hosts_Booking | Space | (0,N) : (1,1) | Booking | Host role |
-| 4 | Space_Equipped_With_Facility | Space | (0,M) : (0,N) | Facility | M:N relationship |
-| 5 | Booking_Has_UsageSession | Booking | (0,1) : (1,1) | UsageSession | 1:1 mapped |
-| 6 | User_ChecksIn_UsageSession | User | (0,N) : (1,1) | UsageSession | Mandatory check-in |
-| 7 | User_ChecksOut_UsageSession | User | (0,N) : (0,1) | UsageSession | Optional check-out |
-| 8 | Space_Requires_Maintenance | Space | (0,N) : (1,1) | MaintenanceRecord | Space maintenance |
-| 9 | User_Reports_Maintenance | User | (0,N) : (1,1) | MaintenanceRecord | Reporter role |
-| 10 | User_Assigned_To_Maintenance| User | (0,N) : (0,1) | MaintenanceRecord | Assigned staff role |
-
----
-
-## 4. Attribute Traceability
-
-### User
-| Attribute Name | Source (BRA §4.1) |
-|---|---|
-| `user_id` | PK / Identifier |
-| `email` | Descriptive |
-| `full_name` | Descriptive |
-| `phone_number` | Descriptive (Nullable) |
-| `role` | Descriptive |
-| `department` | Descriptive |
-| `account_status` | Descriptive |
-
-### Space
-| Attribute Name | Source (BRA §4.2) |
-|---|---|
-| `space_code` | PK / Identifier |
-| `space_name` | Descriptive |
-| `space_type` | Descriptive |
-| `building` | Descriptive |
-| `floor` | Descriptive |
-| `room_number` | Descriptive |
-| `capacity` | Descriptive |
-| `current_status` | Descriptive |
-| `usage_policy` | Descriptive |
-
-### Facility
-| Attribute Name | Source (BRA §4.3) |
-|---|---|
-| `facility_id` | PK / Identifier |
-| `facility_name` | Descriptive |
-| `facility_description` | Descriptive |
-
-### Booking
-| Attribute Name | Source (BRA §4.4) |
-|---|---|
-| `booking_id` | PK / Identifier |
-| `requested_start` | Descriptive |
-| `requested_end` | Descriptive |
-| `purpose` | Descriptive |
-| `expected_participants` | Descriptive |
-| `booking_status` | Descriptive |
-| `created_at` | Descriptive |
-| `decision_time` | Descriptive (Nullable) |
-| `decision_note` | Descriptive (Nullable) |
-| `rejection_reason` | Descriptive (Nullable) |
-
-### UsageSession
-| Attribute Name | Source (BRA §4.5) |
-|---|---|
-| `booking_id` | PK / FK |
-| `actual_start` | Descriptive |
-| `initial_condition` | Descriptive |
-| `actual_end` | Descriptive (Nullable) |
-| `final_condition` | Descriptive (Nullable) |
-| `usage_notes` | Descriptive (Nullable) |
-
-### MaintenanceRecord
-| Attribute Name | Source (BRA §4.6) |
-|---|---|
-| `maintenance_id` | PK / Identifier |
-| `problem_type` | Descriptive |
-| `problem_description` | Descriptive |
-| `start_time` | Descriptive |
-| `completion_time` | Descriptive (Nullable) |
-| `maintenance_status` | Descriptive |
-| `result_note` | Descriptive (Nullable) |
