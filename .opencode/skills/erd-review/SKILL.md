@@ -288,6 +288,10 @@ Read the §1 Design Decisions section of the ERD output document and verify the 
 
 ## 4. Review Report Format
 
+> **OUTPUT PATH — MANDATORY**
+> Save the review report to: `docs/02-erd-design-review-G02.md`
+> Do NOT write to `outputs/` or any other directory.
+
 Produce the review report as a Markdown file with this structure:
 
 ```
@@ -345,7 +349,7 @@ Produce the review report as a Markdown file with this structure:
 <If none: state "None.">
 ```
 
-Save output in: `docs/02-erd-design-review-G02.md`
+**Save output to: `docs/02-erd-design-review-G02.md` NOT `outputs/` or any other location.**
 
 ---
 

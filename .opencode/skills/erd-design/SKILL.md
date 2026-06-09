@@ -20,7 +20,7 @@ Before beginning, the agent MUST have the following document loaded and fully re
 
 | Input | File | Purpose |
 |---|---|---|
-| Business Requirement Analysis | `01-business-requirement-analysis-G02.md` | Single source of truth for all ERD decisions |
+| Business Requirement Analysis | `outputs/01-business-requirement-analysis-G02.md` | Single source of truth for all ERD decisions |
 
 If the input file is not present in context, halt and request it. Do not proceed from memory.
 
@@ -205,7 +205,7 @@ Produce the output as a Markdown file with the following structure:
 <One sub-table per entity listing every attribute and its BRA §4 source>
 ```
 
-Save output as: `02-erd-design-G02.md`
+Save output as: `outputs/02-erd-design-G02.md`
 
 ---
 
