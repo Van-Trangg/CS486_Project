@@ -6,11 +6,11 @@ compatibility: opencode
 
 ## 1. Purpose
 
-This skill instructs the agent to produce a complete, faithful Entity-Relationship Diagram 
-(ERD) in Chen notation for the Campus Space Management System, rendered as Mermaid
-`erDiagram` code. The ERD must be derived exclusively from the approved Step 1 Business
-Requirement Analysis document (`01-business-requirement-analysis-G02.md`). No
-entities, attributes, or relationships may be invented or omitted.
+This skill instructs the agent to produce a complete, faithful Entity-Relationship Diagram
+(ERD) in crow's foot notation for the Campus Space Management System, rendered as
+Mermaid `erDiagram` code. The ERD must be derived exclusively from the approved Step 1
+Business Requirement Analysis document (`01-business-requirement-analysis-G02.md`).
+No entities, attributes, or relationships may be invented or omitted.
 
 ---
 
@@ -62,9 +62,9 @@ Rules:
 - Preserve BRA data types exactly as written (e.g., `VARCHAR(50)`, `INT`, `DATETIME`,
   `NVARCHAR(MAX)`). Do not translate or shorten them. The full type names are retained
   so they can be used directly in SQL DDL at Step 5 without ambiguity.
-- Do not include FK columns as attributes in Mermaid `erDiagram` syntax — relationships
-  are expressed via relationship lines, not repeated FK columns.
-  Exception: `UsageSession.booking_id` is both PK and FK — include it with label `PK, FK`.
+- Include ALL attributes from BRA §4 for each entity, including FK-only columns. FK
+  columns must appear in the entity block with the `FK` suffix label. Do not omit any
+  attribute regardless of its category.
 - Preserve every attribute name exactly as written in the BRA. Do not rename,
   abbreviate, or merge attributes.
 
@@ -73,19 +73,52 @@ Rules:
 For each of the 10 relationships in §5 of the BRA, construct one Mermaid relationship line.
 Use the cardinality specified in §6 as the authoritative source.
 
-**Cardinality translation table** (BRA notation → Mermaid crow's-foot tokens):
+**Step 1 — token lookup table** ((min,max) → two-character token):
 
-| BRA side notation | Meaning | Mermaid left token | Mermaid right token |
-|---|---|---|---|
-| `(0,1)` | Zero or one | `o` | `|` |
-| `(1,1)` | Exactly one | `\|` | `\|` |
-| `(0,N)` | Zero or many | `o` | `{` |
-| `(1,N)` | One or many | `\|` | `{` |
-| `(0,M)` | Zero or many (M-side of M:N) | `o` | `{` |
+| BRA notation | Token |
+|---|---|
+| `(0,1)` | `o\|` |
+| `(1,1)` | `\|\|` |
+| `(0,N)` or `(0,M)` | `o{` |
+| `(1,N)` | `\|{` |
+
+**Step 2 — line assembly rule (critical — read carefully):**
+
+Given a BRA relationship written as `ENTITY_A (x,y) : (a,b) ENTITY_B`, construct the
+Mermaid line using this exact procedure:
+
+1. Look up the token for ENTITY_A's cardinality `(x,y)` → this becomes the **left token** (goes immediately left of `--`).
+2. Look up the token for ENTITY_B's cardinality `(a,b)` → this becomes the **right token** (goes immediately right of `--`).
+3. Write: `ENTITY_A <left_token>--<right_token> ENTITY_B : "label"`
+
+**The left token always belongs to ENTITY_A. The right token always belongs to ENTITY_B. Never swap them.**
+
+**Worked examples — follow this process for every relationship:**
+
+BRA §6.1: `User (0,N) : (1,1) Booking`
+- ENTITY_A = USER, cardinality = (0,N) → token = `o{` → goes LEFT of `--`
+- ENTITY_B = BOOKING, cardinality = (1,1) → token = `||` → goes RIGHT of `--`
+- Result: `USER o{--|| BOOKING : "requests"` 
+- Common mistake: `USER ||--o{ BOOKING` (this reverses which entity is mandatory)
+
+BRA §6.3: `Space (0,N) : (1,1) Booking`
+- ENTITY_A = SPACE, cardinality = (0,N) → token = `o{` → goes LEFT of `--`
+- ENTITY_B = BOOKING, cardinality = (1,1) → token = `||` → goes RIGHT of `--`
+- Result: `SPACE o{--|| BOOKING : "hosts"` 
+- Common mistake: `SPACE ||--o{ BOOKING` (this makes Space mandatory (wrong) and Booking optional (wrong))
+
+BRA §6.5: `Booking (0,1) : (1,1) UsageSession`
+- ENTITY_A = BOOKING, cardinality = (0,1) → token = `o|` → goes LEFT of `--`
+- ENTITY_B = USAGESESSION, cardinality = (1,1) → token = `||` → goes RIGHT of `--`
+- Result: `BOOKING o|--|| USAGESESSION : "tracked by"` 
+- Common mistake: `BOOKING ||--|| USAGESESSION` (this makes Booking mandatory (wrong))
+
+Apply this same two-step process to all 10 relationships. Do not guess token placement
+by symmetry or by reading the label — always derive from the BRA cardinality values.
 
 Mermaid relationship line syntax:
 ```
-ENTITY_A relationship_token--relationship_token ENTITY_B : "label"
+ENTITY_A left_token--right_token ENTITY_B : "label"
 ```
 
 For relationships where User participates in multiple distinct roles with the same entity
@@ -154,8 +187,8 @@ Before writing the final output, run through this checklist mentally and confirm
 
 ```
 [ ] Entity count = 6
-[ ] Every BRA §4 attribute appears in the correct entity block
-[ ] No FK-only columns duplicated as attributes (except UsageSession.booking_id)
+[ ] Every BRA §4 attribute appears in the correct entity block, including all FK columns
+[ ] FK-only columns carry the FK suffix label; UsageSession.booking_id carries PK, FK
 [ ] Every BRA §5 relationship has exactly one Mermaid line
 [ ] Every Mermaid line cardinality matches BRA §6 exactly
 [ ] Multi-role User relationships have distinct labels (requests/approves, checks in/checks out, reports/assigned to)
@@ -226,10 +259,10 @@ These rules are absolute and override any other instruction:
    entity, each role must be a distinct labeled relationship line. Collapsing them into one
    line is an error.
 
-5. **FK exclusion rule.** FK-only columns (e.g., `space_code` in Booking,
-   `requester_id` in Booking) must not appear as attributes in the Mermaid entity block
-   because Mermaid expresses those via relationship lines. The one exception is
-   `UsageSession.booking_id`, which is both PK and FK and must be declared.
+5. **FK inclusion rule.** All FK columns defined in BRA §4 must appear as attributes in
+   their respective Mermaid entity blocks with the `FK` suffix label. Omitting FK columns
+   is a violation of the no omission rule. The only special case is `UsageSession.booking_id`,
+   which carries both `PK, FK` labels as it is simultaneously the primary key and a foreign key.
 
 ---
 
