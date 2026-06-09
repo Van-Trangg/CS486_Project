@@ -28,6 +28,16 @@ The analysis is now exceptionally high quality, robust, and completely ready to 
 * **Evidence:** In Section 7, Business Rule 20 is listed without an accompanying `- Requirement Text:` quote or line citation.
 * **Impact:** Extremely minimal. This is a highly logical business rule derived implicitly from space capacity and expected booking participants, but technically lacks a direct explicit statement in the requirement document.
 * **Suggested Fix:** Add a brief note under Rule 20 stating: *"Note: This is an implied logical constraint derived from Space.capacity (line 11) and Booking.expected_participants (line 13) to ensure physical safety and policy compliance."*
+  
+Advisory issue 2 — Space.current_status alone is insufficient to enforce time-bounded maintenance blocking
+Assumption 4 correctly says maintenance blocks booking within that maintenance timeframe. But the only modelled mechanism is the current_status flag on Space, which is a point-in-time snapshot. If a maintenance record runs from Tuesday to Thursday, and someone submits a booking for Wednesday, the overlap check requires comparing Booking.requested_start/end against MaintenanceRecord.start_time/completion_time — not just reading a status flag. This enforcement logic gap should at minimum be added as an explicit business rule (e.g. "a booking request is invalid if its time window overlaps with any active/in-progress maintenance record for the same space"), even if the ERD does not introduce a FK between them.
+
+Advisory issue 3 — Space minimum participation in the Facility relationship should be 0, not 1
+The PDF says "each space may have several facilities" — that "may" is load-bearing. A plain seminar room with just chairs and no tracked equipment is valid. Changing the Space side from (1,N) to (0,N) in §6.4 is a one-line fix, but if you leave it as (1,N) the ERD will show total participation on the Space side, which the requirement does not support.
+
+Advisory issue 4 — MaintenanceRecord missing a problem_type enum attribute
+The PDF names five problem categories explicitly. Storing only free-text problem_description means you cannot query "show all spaces with projector failures" without full-text search. Add a problem_type attribute with a constrained enum (matching the five types in the PDF) alongside the free-text description field. This is a moderate-priority fix — it won't block the ERD, but it will be flagged during the design validation phase (step 4).
+
 
 ---
 

@@ -118,8 +118,8 @@ The attributes for each identified entity are listed below, grouped by Primary K
 | :--- | :--- | :--- | :--- | :--- |
 | `booking_id` | PK / FK | INT | Yes (Primary) | Reference to `Booking`. Establishes 1-to-1 mapping. |
 | `check_in_staff_id` | FK | VARCHAR(50) | No | Reference to `User` (staff checking in). |
-| `actual_start` | Descriptive | DATETIME | No | Physical start timestamp at check-in. Nullable|
-| `initial_condition` | Descriptive | NVARCHAR(MAX) | No | Room state at arrival. Nullable |
+| `actual_start` | Descriptive | DATETIME | No | Physical start timestamp at check-in.|
+| `initial_condition` | Descriptive | NVARCHAR(MAX) | No | Room state at arrival.|
 | `check_out_staff_id` | FK | VARCHAR(50) | No | Reference to `User` (staff checking out). Nullable. |
 | `actual_end` | Descriptive | DATETIME | No | Physical exit timestamp at checkout. Nullable. |
 | `final_condition` | Descriptive | NVARCHAR(MAX) | No | Room state at departure. Nullable. |
@@ -132,6 +132,7 @@ The attributes for each identified entity are listed below, grouped by Primary K
 | `space_code` | FK | VARCHAR(50) | No | Reference to `Space`. |
 | `reporter_id` | FK | VARCHAR(50) | No | Reference to `User` who reported the issue. |
 | `assigned_staff_id` | FK | VARCHAR(50) | No | Reference to `User` (facility staff technician). Nullable. |
+| `problem_type` | Descriptive | VARCHAR(50) | No | Restricted to: 'Projector Failure', 'Air-Conditioning Issue', 'Cleaning Issue', 'Furniture Damage', 'Network Issue', 'Other'. |
 | `problem_description` | Descriptive | NVARCHAR(MAX) | No | Details about the issue. |
 | `start_time` | Descriptive | DATETIME | No | Maintenance beginning timestamp. |
 | `completion_time` | Descriptive | DATETIME | No | Maintenance completion timestamp (must be > `start_time`). Nullable. |
@@ -154,8 +155,8 @@ The relationships established between entities are detailed below.
    - *Participating Entities:* `Space` (0,N) : (1,1) `Booking`
    - *Business Meaning:* A physical space is reserved for multiple scheduled bookings. Each booking request is for exactly one physical space.
 4. **Space Contains Facility Mapping (`Space_Equipped_With_Facility`)**
-   - *Participating Entities:* `Space` (1,N) : (0,N) `Facility`
-   - *Business Meaning:* A physical space is linked to its inventory of equipment. Each inventory record is associated with exactly one space.
+   - *Participating Entities:* `Space` (0,M) : (0,N) `Facility`
+   - *Business Meaning:* A space may contain zero or multiple facility types, and a facility type may be available in multiple spaces.
 5. **Booking Tracked by Usage Session (`Booking_Has_UsageSession`)**
    - *Participating Entities:* `Booking` (0,1) : (1,1) `UsageSession` 
    - *Business Meaning:* An approved booking has at most one physical usage session tracking actual entry and exit. A usage session corresponds to exactly one specific booking request.
@@ -190,8 +191,8 @@ The cardinality and participation constraints for each relationship are justifie
 ### 6.3. `Space` to `Booking` — **(0,N) : (1,1)**
 - **Justification:** A physical space (e.g., a newly configured classroom) can have 0 bookings initially, or can host many (N) bookings. Every booking request must specify exactly 1 physical space (`space_code` is mandatory). Participation is optional on the Space side and mandatory on the Booking side.
 
-### 6.4. `Space` to `Facility` (via `SpaceFacility`) — **(1,M) : (0,N)**
-- **Justification:** A space can contain at least one (1) or multiple (N) facilities. A facility type may be installed in multiple (N) spaces, but may also exist in the facility catalog without currently being assigned to any space (0).
+### 6.4. `Space` to `Facility` — **(0,M) : (0,N)**
+- **Justification:** A space can contain zero or multiple (M) facilities. A facility type may be installed in multiple (N) spaces, but may also exist in the facility catalog without currently being assigned to any space (0).
 
 ### 6.5. `Booking` to `UsageSession` — **(0,1) : (1,1)**
 - **Justification:** A booking request in `'Pending'`, `'Rejected'`, or `'Cancelled'` states will have 0 actual usage sessions. If approved and checked in, it will have exactly 1 usage session. A usage session cannot exist without a valid booking. Therefore, participation is optional on the Booking side, and mandatory on the UsageSession side. This represents a 1-to-1 relationship with the primary key `booking_id` as a foreign key.
@@ -200,7 +201,7 @@ The cardinality and participation constraints for each relationship are justifie
 - **Justification:** A facility staff member can check in or check out 0 or many actual usage sessions. Every usage session must be physically checked in by exactly 1 staff member (`check_in_staff_id` is mandatory). Participation is optional on the User side and mandatory on the UsageSession side.
 
 ### 6.7. `User` to `UsageSession` (Check-out Staff) — **(0,N) : (0,1)**
-- **Justification:** A facility staff member can check out and complete 0 or many usage sessions. A usage session may be completed by at most 1 staff member (`completed_by_staff_id`). However, ongoing sessions that have not yet ended may not have a checking-out staff member recorded. Therefore, participation is optional on both the User side and the UsageSession side.
+- **Justification:** A facility staff member can check out and complete 0 or many usage sessions. A usage session may be completed by at most 1 staff member (`check_out_staff_id`). However, ongoing sessions that have not yet ended may not have a checking-out staff member recorded. Therefore, participation is optional on both the User side and the UsageSession side.
 
 ### 6.8. `Space` to `MaintenanceRecord` — **(0,N) : (1,1)**
 - **Justification:** A physical space may have had 0 maintenance activities, or can have many (N) reported problems over its lifespan. Each maintenance record must belong to exactly 1 space (`space_code` is mandatory). Participation is optional on the Space side and mandatory on the Maintenance Record side.
@@ -239,9 +240,9 @@ The following explicit business rules are derived directly from the requirement 
     - *Requirement Text:* "Each booking request has a status, such as pending, approved, rejected, cancelled, checked in, completed, or no-show." (line 14)
 11. **Double Booking Prevention:** Overlapping approved bookings for the same space are strictly forbidden.
     - *Requirement Text:* "The system must prevent conflicting bookings. The same space cannot have two approved bookings with overlapping time periods." (line 14)
-12. **Unavailable Spaces Blocked:** Bookings cannot be approved for unavailable, temporarily closed, or retired rooms.
+12. **Unavailable Spaces Blocked:** A booking request cannot be approved for a space that is under maintenance, temporarily closed, or retired during the requested booking period. Additionally, a booking request must not overlap with any active (maintenance_status is 'Reported' or 'In Progress') or scheduled maintenance period for the same space.
     - *Requirement Text:* "A space that is under maintenance, closed, or retired cannot be booked." (line 14)
-13. **Approval Tracking:** Decisions on booking approvals must record the staff/manager who decided, decision time, and feedback notes.
+13. **Approval Tracking:** Decisions on booking approvals must record the staff/manager who decided, decision time, and decision notes.
     - *Requirement Text:* "When a booking is approved or rejected, the system records the staff member who made the decision, the decision time, and a decision note." (line 15)
 14. **Rejection Justification:** Rejected bookings must store the specific reason.
     - *Requirement Text:* "If the booking is rejected, the rejection reason should be stored." (line 15)
@@ -249,13 +250,11 @@ The following explicit business rules are derived directly from the requirement 
     - *Requirement Text:* "When the requester arrives, facility staff can check in the booking. The system records the actual start time, the person who checked in the booking, and the initial condition of the space." (line 16)
 16. **Usage Session Completion:** Ending a session must log actual end time, final room condition, and usage notes.
     - *Requirement Text:* "When the session ends, facility staff can complete the booking by recording the actual end time, the final condition of the space, and any usage notes." (line 16)
-17. **Maintenance Logging:** Maintenance records must track the related space, reporter, assigned staff, description, start, end, status, and result notes.
+17. **Maintenance Logging:** Maintenance records must track the related space, reporter, assigned staff, description, start time, end time, status, and result notes.
     - *Requirement Text:* "Each maintenance record stores the related space, reporter, assigned staff member, problem description, start time, completion time, status, and result note." (line 17)
-18. **Maintenance Booking Block:** A space currently under maintenance cannot accept bookings.
-    - *Requirement Text:* "A space under maintenance cannot be booked." (line 17)
-19. **Historical and Operational Reports:** The system must preserve logs and support viewing booking history, upcoming events, active maintenance, and no-show counts.
+18. **Historical and Operational Reports:** The system must preserve logs and support viewing booking history, upcoming events, active maintenance, and no-show counts.
     - *Requirement Text:* "The system should keep historical records of bookings and maintenance activities. Staff should be able to view booking history, upcoming bookings, spaces under maintenance, and no-show bookings." (line 18)
-20. **Capacity Limit Rule:** Expected participant count must not exceed the capacity of the selected space.
+19. **Capacity Limit Rule:** Expected participant count must not exceed the capacity of the selected space.
 ---
 
 ## 8. Assumptions
@@ -270,6 +269,7 @@ The following operational and data design assumptions are defined to supplement 
 5. **Soft Deletion Policy:** To preserve historical booking and maintenance records, rows in `User` and `Space` are never physically deleted. Instead, they are soft-deleted by setting `User.account_status = 'Inactive'` and `Space.current_status = 'Retired'`.
 6. **Time Order Constraint:** Booking requested start must be strictly before requested end (`requested_end > requested_start`). Similarly, actual start must be strictly before actual end, and maintenance start must be before completion.
 7. **Facility Catalog and Space Inventory:** The system stores facility types (e.g., Projector, Whiteboard, Microphone) as entries in a facility catalog rather than tracking individual physical equipment items. 
+8. **Department Representation:** Department information is stored as a descriptive text attribute within the User entity. The system does not manage departments as a separate entity because the requirements do not specify department-level operations, relationships, or reporting requirements.
 ---
 
 ## 9. Open Questions
