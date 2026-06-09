@@ -23,7 +23,7 @@ Before assuming anything, inspect the project:
 Create or update the following files:
 
 1. `outputs/01-business-requirement-analysis-G02.md`
-
+2. `outputs/02-erd-design-G02.md`
 Do not skip any Markdown file.
 
 ---
@@ -45,5 +45,17 @@ Requirements:
 - Do not remove template headings.
 - Base findings on the requirement document.
 - Separate facts, assumptions, and open questions.
+
+# Step 2: Conceptual Design / ERD
+Create an ERD using Mermaid code to conceptualize the analysis obtained from the previous step.
+
+Strictly follow instructions at:
+.opencode/skills/erd-design/SKILL.md
+
+Output and update file at:
+outputs/02-erd-design-G02.md
+
+Verify output using review from:
+docs\02-erd-design-review-G02.md
 
 
