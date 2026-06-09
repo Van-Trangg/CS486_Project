@@ -24,7 +24,7 @@ Both documents must be loaded and fully read before any review begins:
 | Input | File | Role |
 |---|---|---|
 | Ground truth | `outputs/01-business-requirement-analysis-G02.md` | What the ERD must represent |
-| Subject under review | `docs/02-erd-design-G02.md` | What the ERD actually represents |
+| Subject under review | `outputs/02-erd-design-G02.md` | What the ERD actually represents |
 
 If either file is absent, halt and request it.
 
@@ -65,17 +65,27 @@ For each entity, compare BRA §4 attributes against ERD attributes line by line:
 | 2a. No omissions | Every BRA §4 attribute appears in the correct ERD entity block |
 | 2b. No inventions | No attribute in ERD is absent from BRA §4 |
 | 2c. Name fidelity | Attribute names match BRA exactly (no abbreviations, renames, or case changes) |
-| 2d. Type fidelity | Every attribute's type token in the ERD matches the BRA §4 data type **verbatim** (e.g., `VARCHAR(50)`, `INT`, `DATETIME`, `NVARCHAR(MAX)`, `INT(Identity)`). Generic aliases such as `string`, `text`, `int`, or `datetime` are WRONG and must be flagged as FAIL. |
-| 2e. PK labelling | PK attributes carry the `PK` suffix; the shared key `UsageSession.booking_id` carries `PK, FK` |
-| 2f. FK exclusion | FK-only columns (e.g., `requester_id`, `space_code` in Booking) do not appear as attributes in the Mermaid block |
+| 2d. Type fidelity | Every attribute's type token in the ERD matches the BRA §4 data type **verbatim** (e.g., `VARCHAR(50)`, `INT`, `DATETIME`, `NVARCHAR(MAX)`). The reviewer must scan every attribute line for the known-bad patterns listed below and flag any match as FAIL. |
+
+**Check 2d — known-bad type patterns (scan every attribute line for these):**
+
+| Pattern to scan for | Why it is wrong | Correct form |
+|---|---|---|
+| `string` | Generic alias, not a SQL type | `VARCHAR(n)` per BRA |
+| `text` | Generic alias, not a SQL type | `NVARCHAR(MAX)` per BRA |
+| `int` (lowercase) | Case mismatch; also a generic alias signal | `INT` |
+| `datetime` (lowercase) | Case mismatch | `DATETIME` |
+| `INT(Identity)` | Appends an implementation qualifier that is not a data type; also breaks Mermaid's parser when written as `INT (Identity)` with a space | `INT` — auto-increment is a Step 5 DDL concern |
+| `INT (Identity)` (with space) | Same as above; the space additionally causes a Mermaid parse error | `INT` |
+| Any `INT` variant with a parenthetical qualifier | e.g. `INT(1)`, `INT(11)`, `INT(PK)` — none of these are valid BRA types | `INT` unless BRA explicitly specifies otherwise |
+| `VARCHAR` without length specifier | e.g. bare `VARCHAR` with no `(n)` | Must match BRA exactly, e.g. `VARCHAR(50)` |
+| 2e. PK labelling | PK attributes carry the `PK` suffix; the shared key `UsageSession.booking_id` carries `PK, FK`; FK-only attributes carry the `FK` suffix |
 
 **Pass condition:** All sub-checks pass for all 6 entities.
 
 **Special attention:**
-- `UsageSession.booking_id` must appear with `PK, FK` — it is the only attribute that
-  is both a primary key and a foreign key at the conceptual level.
-- `check_out_staff_id` in UsageSession must use exactly this name (the BRA was
-  previously inconsistent — the final version uses `check_out_staff_id`).
+- `UsageSession.booking_id` must appear with `PK, FK` — it is both primary key and foreign key.
+- `check_out_staff_id` in UsageSession must use exactly this name.
 - `MaintenanceRecord` must include `problem_type` (added in the final BRA revision).
 
 ---
@@ -123,14 +133,29 @@ back to (min,max) notation and compare against BRA §6. This check must be perfo
 mechanically, token by token — it must not be done by impression or by re-reading the
 label. The reviewer must write out the decoded values for every relationship.
 
-**Decoding reference:**
+**Decoding reference — all valid Mermaid crow's foot token combinations:**
 
-| Mermaid token pair | Decoded (min,max) |
+| Token (left or right of `--`) | Decoded (min,max) |
 |---|---|
-| `\|\|` | (1,1) — exactly one |
-| `o\|` | (0,1) — zero or one |
-| `\|{` | (1,N) — one or many |
-| `o{` | (0,N) — zero or many |
+| `\|\|` | (1,1) — exactly one, mandatory |
+| `o\|` | (0,1) — zero or one, optional singular |
+| `\|o` | (0,1) — zero or one (right-side form) |
+| `\|{` | (1,N) — one or many, mandatory plural |
+| `o{` | (0,N) — zero or many, optional plural |
+| `}\|` or `{\|` | (1,N) — one or many (alternative form) |
+| `}o` or `{o` | (1,N) — one or many, **NOT (0,N)**. The `}` or `{` symbol means "many", and the adjacent `o` or `\|` indicates the minimum on the *other* end. When `}` faces the entity it describes, it means that entity has many instances — minimum is determined by the outer symbol. Specifically: `}o` = (1,N), `}|` = (1,N). Do NOT misread `}o` as (0,N). |
+
+**Token disambiguation rule:** The token immediately adjacent to `--` (touching the dashes)
+belongs to the entity on that side. Token characters further from `--` indicate the minimum
+participation (o = optional/zero, | = mandatory/one). The character closest to the entity name
+indicates multiplicity ({ or } = many, | = one).
+
+**Strict Match equality rule:** The Match column must be YES if and only if the decoded
+value is **character-for-character identical** to the BRA value. If the decoded value is
+(1,N) and BRA says (0,N), the match is NO — even if the relationship "looks right" from the
+label or context. The reviewer must not infer or assume correctness; only exact equality counts.
+A reviewer who writes YES on a row where the decoded value differs from the BRA value has
+made a verification error, and the entire Check 4 result is invalidated.
 
 **Critical direction rule:** In a Mermaid relationship line of the form
 `ENTITY_A token--token ENTITY_B`, the **left token** describes the cardinality of
