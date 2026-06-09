@@ -80,7 +80,7 @@ For each entity, compare BRA §4 attributes against ERD attributes line by line:
 3. Flag any BRA relationship missing from the ERD (omission) or any ERD relationship
    line not traceable to BRA §5 (invention).
 
-**Pass condition:** All 10 relationships present in ERD; no extra relationships. Flag any collapsed multi-role relationships or unmentioned inventions.
+**Pass condition:** All relationships present in ERD; no extra relationships. Flag any collapsed multi-role relationships or unmentioned inventions.
 
 ---
 ### Check 4 — Cardinality Fidelity
@@ -133,7 +133,8 @@ The reviewer **must dynamically generate and fill out** this table for every rel
 
 Any row with a NO in either Match column is a FAIL for this check.
 **High-risk relationships to check carefully:**
-Any 1:N relationship: Entity A side should be (0,N) or (1,N). Common error: Direction reversal — swapping which entity is the "many" side is the most common error and must be explicitly decoded, never assumed
+- Any 1:N relationship: direction reversal — swapping which entity is the "many" side is the most common error and must be explicitly decoded, never assumed.
+- Any relationship where one side is `(0,1)`: this is the second most common error. `(0,1)` decodes to `o|` and `(1,1)` decodes to `||`. These are different tokens. An agent that writes `||--||` when the BRA says `(0,1):(1,1)` has collapsed the optional side into mandatory. Treat every `||--||` line with suspicion — decode both sides from the BRA before accepting it.
 **Pass condition:** All a×b cardinality comparisons (a per relationship × b relationships) match BRA §6.
 *Anti-Rubber-Stamp Rule: If this decoded table is missing or left empty, the entire review is invalid.*
 
@@ -192,8 +193,8 @@ Read the §1 Design Decisions section of the ERD output document and verify the 
 |---|---|
 | 8a. No Chen reference | The prose must not claim the ERD uses "Chen notation" or "Chen-style" anything. Mermaid `erDiagram` renders crow's foot exclusively. Any Chen reference is factually wrong and must be flagged as FAIL. |
 | 8b. Notation correctly named | The ERD notation must be described as "crow's foot notation" rendered via Mermaid `erDiagram`. |
-| 8c. Multi-role representation described | The section must explain how multi-role User relationships (requester/approver, check-in/check-out, reporter/assigned) are handled as separate labeled lines. |
-| 8d. M:N Space↔Facility described | The section must state that the M:N relationship is rendered as a direct line and that the junction table is deferred to Step 3. |
+| 8c. Multi-role representation described | The section must explain how multi-role relationships (where one entity participates in multiple distinct roles with another) are handled as separate labeled lines. |
+| 8d. M:N relationships described | If any M:N relationship exists in the BRA, the section must state that it is represented as a direct line in the conceptual ERD and that any junction entity is deferred to Step 3 logical design. |
 | 8e. No false claims | The section must not make technically incorrect statements about Mermaid's capabilities or the ERD's notation. |
 
 **Pass condition:** All sub-checks pass. Any Chen notation reference is an automatic FAIL.

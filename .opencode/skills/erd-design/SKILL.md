@@ -26,16 +26,22 @@ For each identified entity, map every attribute listed in §4 of the BRA.
 
 ### Stage 3 — Relationship Line Construction
 For each relationship defined in §5 of the BRA, construct one Mermaid relationship line using the authoritative cardinalities specified in §6.
-| BRA notation | Token |
-|---|---|
-| `(0,1)` | `o\|` |
-| `(1,1)` | `\|\|` |
-| `(0,N)` or `(0,M)` | `o{` |
-| `(1,N)` | `\|{` |
+| BRA notation | Token | Critical note |
+|---|---|---|
+| `(0,1)` | `o\|` | **Optional singular** — the `o` means zero is allowed. Do NOT use `\|\|` for this. |
+| `(1,1)` | `\|\|` | **Mandatory singular** — both pipes mean exactly one, always present. |
+| `(0,N)` or `(0,M)` | `o{` | Optional plural |
+| `(1,N)` | `\|{` | Mandatory plural |
+
+> ⚠️ **Most common error:** Confusing `(0,1)` with `(1,1)`. These are different tokens.
+> `(0,1)` → `o|` (the entity is optional — it may not exist)
+> `(1,1)` → `||` (the entity is mandatory — it must always exist)
+> A BOOKING that has no UsageSession yet is `(0,1)` on the BOOKING side — use `o|`, never `||`.
+
 **Line Assembly Rules:**
 Given a BRA relationship `ENTITY_A (x,y) : (a,b) ENTITY_B`, construct the Mermaid line using this exact procedure:
-1. Look up the token for ENTITY_A's cardinality `(x,y)` using the token table below $\rightarrow$ this becomes the **left token** (placed immediately left of `--`).
-2. Look up the token for ENTITY_B's cardinality `(a,b)` $\rightarrow$ this becomes the **right token** (placed immediately right of `--`).
+1. Look up the token for ENTITY_A's cardinality `(x,y)` using the token table above → this becomes the **left token** (placed immediately left of `--`).
+2. Look up the token for ENTITY_B's cardinality `(a,b)` → this becomes the **right token** (placed immediately right of `--`).
 3. Format as: `ENTITY_A <left_token>--<right_token> ENTITY_B : "label"`
 
 **The left token always belongs to ENTITY_A. The right token always belongs to ENTITY_B. Never swap them.**
@@ -47,14 +53,21 @@ Mermaid relationship line syntax:
 ENTITY_A left_token--right_token ENTITY_B : "label"
 ```
 
-| BRA Notation | Mermaid Token |
-|---|---|
-| `(0,1)` | `o\|` |
-| `(1,1)` | `\|\|` |
-| `(0,N)` or `(0,M)` | `o{` |
-| `(1,N)` | `\|{` |
+**Worked examples:**
 
-*Note: If an entity pair has multiple distinct structural roles, generate separate relationship lines with unique labels (e.g., "requests" vs. "approves"). Do not collapse them.*
+BRA §6.1: `User (0,N) : (1,1) Booking` — User side = `o{`, Booking side = `||`
+→ `USER o{--|| BOOKING : "requests"` ✅
+→ `USER ||--o{ BOOKING` ❌ direction reversed
+
+BRA §6.3: `Space (0,N) : (1,1) Booking` — Space side = `o{`, Booking side = `||`
+→ `SPACE o{--|| BOOKING : "hosts"` ✅
+→ `SPACE ||--o{ BOOKING` ❌ direction reversed
+
+BRA §6.5: `Booking (0,1) : (1,1) UsageSession` — Booking side = `o|`, Session side = `||`
+→ `BOOKING o|--|| USAGESESSION : "tracked by"` ✅
+→ `BOOKING ||--|| USAGESESSION` ❌ **(0,1) ≠ (1,1) — BOOKING side must be `o|` not `||`**
+The booking is optional from the session's perspective: not every booking has a session yet.
+Treat `(0,1)` and `(1,1)` as strictly different tokens every time.
 
 ### Stage 4 — Mermaid Code Assembly
 Assemble the final Mermaid block using this template structure:
@@ -64,29 +77,15 @@ Assemble the final Mermaid block using this template structure:
 erDiagram
 
     %% ── Entities ──────────────────────────────────────────────
-    USER {
+    ENTITY_1 {
         <attributes>
     }
 
-    SPACE {
+    ENTITY_2 {
         <attributes>
     }
 
-    FACILITY {
-        <attributes>
-    }
-
-    BOOKING {
-        <attributes>
-    }
-
-    USAGESESSION {
-        <attributes>
-    }
-
-    MAINTENANCERECORD {
-        <attributes>
-    }
+    %% ... one block per entity extracted from BRA §3 ...
 
     %% ── Relationships ─────────────────────────────────────────
     <relationship lines>

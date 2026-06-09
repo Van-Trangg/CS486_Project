@@ -4,7 +4,7 @@
 
 ## 1. Design Decisions
 
-This ERD uses crow's foot notation rendered via Mermaid `erDiagram`. It is derived strictly from the provided Business Requirement Analysis (BRA) document. Multi-role relationships for the `User` entity (e.g., as requester, approver, check-in staff, maintenance reporter) are represented as distinct relationship lines to maintain clear, unambiguous structural definitions. Many-to-Many relationships, specifically `Space` to `Facility`, are handled as defined, though Mermaid `erDiagram` visualizes this as direct connectivity; complex association attributes are not currently present in the requirements for this relationship. All foreign keys and primary keys are explicitly mapped as defined in the BRA.
+We utilize the crow's foot notation rendered via Mermaid's `erDiagram` for the Campus Space Management System, as it provides a clear, standardized representation of relationships and cardinalities. Multi-role relationships (such as User interacting as Requester, Approver, Reporter, etc.) are handled by defining distinct, labeled relationship lines for each role, ensuring that the specific function of the user in each context is explicit. Many-to-Many (M:N) relationships, specifically between `Space` and `Facility`, are managed by defining the relationship as specified, though Mermaid's `erDiagram` parser handles M:N visual rendering as a bridge in implementation (logical model). We adhere strictly to the cardinalities provided in the BRA to maintain data integrity and project requirements.
 
 ---
 
@@ -84,7 +84,7 @@ erDiagram
 
     %% ── Relationships ─────────────────────────────────────────
     %% BRA §5.1 — User_Requests_Booking
-    USER o{--|| BOOKING : "submits"
+    USER o{--|| BOOKING : "requests"
     %% BRA §5.2 — User_Approves_Booking
     USER o{--o| BOOKING : "approves"
     %% BRA §5.3 — Space_Hosts_Booking
@@ -92,17 +92,17 @@ erDiagram
     %% BRA §5.4 — Space_Equipped_With_Facility
     SPACE o{--o{ FACILITY : "contains"
     %% BRA §5.5 — Booking_Has_UsageSession
-    BOOKING o|--|| USAGESESSION : "tracked_by"
+    BOOKING o|--|| USAGESESSION : "tracked by"
     %% BRA §5.6 — User_ChecksIn_UsageSession
-    USER o{--|| USAGESESSION : "checks_in"
+    USER o{--|| USAGESESSION : "checks in"
     %% BRA §5.7 — User_ChecksOut_UsageSession
-    USER o{--o| USAGESESSION : "checks_out"
+    USER o{--o| USAGESESSION : "checks out"
     %% BRA §5.8 — Space_Requires_Maintenance
     SPACE o{--|| MAINTENANCERECORD : "requires"
     %% BRA §5.9 — User_Reports_Maintenance
     USER o{--|| MAINTENANCERECORD : "reports"
     %% BRA §5.10 — User_Assigned_To_Maintenance
-    USER o{--o| MAINTENANCERECORD : "assigned_to"
+    USER o{--o| MAINTENANCERECORD : "assigned to"
 ```
 
 ---
@@ -111,23 +111,23 @@ erDiagram
 
 | # | Relationship Name | Entity A | Cardinality | Entity B | Notes |
 |---|---|---|---|---|---|
-| 1 | User_Requests_Booking | User | (0,N) : (1,1) | Booking | Requester role |
-| 2 | User_Approves_Booking | User | (0,N) : (0,1) | Booking | Approver role |
-| 3 | Space_Hosts_Booking | Space | (0,N) : (1,1) | Booking | |
-| 4 | Space_Equipped_With_Facility | Space | (0,M) : (0,N) | Facility | |
-| 5 | Booking_Has_UsageSession | Booking | (0,1) : (1,1) | UsageSession | |
-| 6 | User_ChecksIn_UsageSession | User | (0,N) : (1,1) | UsageSession | Check-in role |
-| 7 | User_ChecksOut_UsageSession | User | (0,N) : (0,1) | UsageSession | Check-out role |
-| 8 | Space_Requires_Maintenance | Space | (0,N) : (1,1) | MaintenanceRecord | |
-| 9 | User_Reports_Maintenance | User | (0,N) : (1,1) | MaintenanceRecord | Reporter role |
-| 10 | User_Assigned_To_Maintenance | User | (0,N) : (0,1) | MaintenanceRecord | Assigned staff role |
+| 1 | User_Requests_Booking | User | (0,N) : (1,1) | Booking | Requester role. |
+| 2 | User_Approves_Booking | User | (0,N) : (0,1) | Booking | Approver role. |
+| 3 | Space_Hosts_Booking | Space | (0,N) : (1,1) | Booking | Hosting role. |
+| 4 | Space_Equipped_With_Facility | Space | (0,M) : (0,N) | Facility | M:N relationship. |
+| 5 | Booking_Has_UsageSession | Booking | (0,1) : (1,1) | UsageSession | 1:1 relationship. |
+| 6 | User_ChecksIn_UsageSession | User | (0,N) : (1,1) | UsageSession | Check-in role. |
+| 7 | User_ChecksOut_UsageSession | User | (0,N) : (0,1) | UsageSession | Check-out role. |
+| 8 | Space_Requires_Maintenance | Space | (0,N) : (1,1) | MaintenanceRecord | Maintenance context. |
+| 9 | User_Reports_Maintenance | User | (0,N) : (1,1) | MaintenanceRecord | Reporter role. |
+| 10 | User_Assigned_To_Maintenance | User | (0,N) : (0,1) | MaintenanceRecord | Assigned staff role. |
 
 ---
 
 ## 4. Attribute Traceability
 
-### User Entity
-| Attribute | BRA §4 Source |
+### Entity: User
+| Attribute Name | Source |
 |---|---|
 | `user_id` | §4.1 |
 | `email` | §4.1 |
@@ -137,8 +137,8 @@ erDiagram
 | `department` | §4.1 |
 | `account_status` | §4.1 |
 
-### Space Entity
-| Attribute | BRA §4 Source |
+### Entity: Space
+| Attribute Name | Source |
 |---|---|
 | `space_code` | §4.2 |
 | `space_name` | §4.2 |
@@ -150,49 +150,49 @@ erDiagram
 | `current_status` | §4.2 |
 | `usage_policy` | §4.2 |
 
-### Facility Entity
-| Attribute | BRA §4 Source |
+### Entity: Facility
+| Attribute Name | Source |
 |---|---|
 | `facility_id` | §4.3 |
 | `facility_name` | §4.3 |
 | `facility_description` | §4.3 |
 
-### Booking Entity
-| Attribute | BRA §4 Source |
+### Entity: Booking
+| Attribute Name | Source |
 |---|---|
 | `booking_id` | §4.4 |
-| `space_code` | §4.4 |
-| `requester_id` | §4.4 |
+| `space_code` | §4.4 (FK) |
+| `requester_id` | §4.4 (FK) |
 | `requested_start` | §4.4 |
 | `requested_end` | §4.4 |
 | `purpose` | §4.4 |
 | `expected_participants` | §4.4 |
 | `booking_status` | §4.4 |
 | `created_at` | §4.4 |
-| `approver_id` | §4.4 |
+| `approver_id` | §4.4 (FK) |
 | `decision_time` | §4.4 |
 | `decision_note` | §4.4 |
 | `rejection_reason` | §4.4 |
 
-### UsageSession Entity
-| Attribute | BRA §4 Source |
+### Entity: UsageSession
+| Attribute Name | Source |
 |---|---|
-| `booking_id` | §4.5 |
-| `check_in_staff_id` | §4.5 |
+| `booking_id` | §4.5 (PK, FK) |
+| `check_in_staff_id` | §4.5 (FK) |
 | `actual_start` | §4.5 |
 | `initial_condition` | §4.5 |
-| `check_out_staff_id` | §4.5 |
+| `check_out_staff_id` | §4.5 (FK) |
 | `actual_end` | §4.5 |
 | `final_condition` | §4.5 |
 | `usage_notes` | §4.5 |
 
-### MaintenanceRecord Entity
-| Attribute | BRA §4 Source |
+### Entity: MaintenanceRecord
+| Attribute Name | Source |
 |---|---|
 | `maintenance_id` | §4.6 |
-| `space_code` | §4.6 |
-| `reporter_id` | §4.6 |
-| `assigned_staff_id` | §4.6 |
+| `space_code` | §4.6 (FK) |
+| `reporter_id` | §4.6 (FK) |
+| `assigned_staff_id` | §4.6 (FK) |
 | `problem_type` | §4.6 |
 | `problem_description` | §4.6 |
 | `start_time` | §4.6 |
