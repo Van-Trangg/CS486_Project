@@ -49,13 +49,13 @@ Requirements:
 # Step 2: Conceptual Design / ERD
 Create an ERD using Mermaid code to conceptualize the analysis obtained from the previous step.
 
-Strictly follow instructions at:
+To design the ERD, strictly follow instructions at:
 .opencode/skills/erd-design/SKILL.md
 
-Output and update file at:
-outputs/02-erd-design-G02.md
+After producing the ERD, self-diagnose and cross-examine with BRA by following:
+.opencode/skills/erd-review/SKILL.md
 
-Verify output using review from:
+Verify and correct output (if applicable) using review from:
 docs\02-erd-design-review-G02.md
 
 
