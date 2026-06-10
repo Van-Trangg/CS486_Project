@@ -16,12 +16,16 @@ This project transforms business requirements into database design artifacts.
 Always follow this order:
 
 1. Analyze business requirements.
+2. Conceptual Database Design (ERD).
+3. Logical Database Design (Relational schema).
 
 Do not jump directly to DDL. The documents from the prior steps should be followed in the later steps.
 
 ## Required Outputs
 
 - `outputs/01-business-requirement-analysis-G02.md`
+- `outputs/02-erd-design-G02.md`
+- `outputs/03-logical-design-G02.md`
 
 ## DBMS
 
@@ -38,7 +42,7 @@ Use Microsoft SQL Server.
 ## Quality Requirements
 For every output:
 - Use structured headings.
-- Justify every identified entity.
+- Justify every identified entity (for BRA).
 - Do not invent requirements that are not stated.
 - Distinguish explicit requirements from assumptions.
 - Provide traceability from requirement text to identified entities and relationships.

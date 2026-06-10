@@ -59,3 +59,15 @@ Verify and correct output (if applicable) using review from:
 docs\02-erd-design-review-G02.md
 
 
+# Step 3: Logical Database Design
+
+Translate the conceptual ERD design into a relational database schema.
+
+To design the logical schema, strictly follow instructions at:
+.opencode/skills/logical-design/SKILL.md
+
+Generate or update:
+outputs/03-logical-design-G02.md
+
+
+
