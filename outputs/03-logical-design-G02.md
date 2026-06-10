@@ -175,48 +175,7 @@ ALTER TABLE MAINTENANCERECORD ADD CONSTRAINT CK_MAINTENANCE_PROBLEM_TYPE CHECK (
 );
 ```
 
----
-
-## 4. Normalization Assessment (3NF Verification)
-
-### 4.1. Table: USER
-- **1NF**: Every cell contains atomic values. Column data types are standardized, and there are no repeating groups.
-- **2NF**: The primary key is a single column (`user_id`). Therefore, partial dependencies are mathematically impossible; all non-key columns (`email`, `full_name`, `phone_number`, `role`, `department`, `account_status`) are fully dependent on `user_id`.
-- **3NF**: There are no transitive dependencies. While `role` or `department` describe attributes of a user, they do not determine any other non-key attributes (e.g., knowing a user's department does not determine their name or email). All non-key attributes depend solely and directly on `user_id`.
-
-### 4.2. Table: SPACE
-- **1NF**: All columns contain atomic attributes. There are no multi-valued attributes or repeating groups.
-- **2NF**: The primary key is single-column (`space_code`). No partial dependencies exist. All columns (`space_name`, `space_type`, `building`, `floor`, `room_number`, `capacity`, `current_status`, `usage_policy`) are fully dependent on the PK.
-- **3NF**: There are no transitive dependencies. For instance, `capacity` or `current_status` depend directly on `space_code`. While `building` and `floor` are geographic attributes, they are descriptive properties of the room and do not determine other columns like `capacity` or `usage_policy`. All attributes are non-transitively dependent on the PK.
-
-### 4.3. Table: FACILITY
-- **1NF**: All fields are atomic (e.g., names are plain strings and descriptions are texts).
-- **2NF**: Single-column PK (`facility_id`). No partial dependencies are possible.
-- **3NF**: The only non-key columns are `facility_name` (which is unique) and `facility_description`. Neither column determines the other, and both depend directly on `facility_id`. No transitive dependencies exist.
-
-### 4.4. Table: SPACE_FACILITY
-- **1NF**: The table structures a binary relationship mapping. All values are atomic.
-- **2NF**: The PK is composite: `(space_code, facility_id)`. There are no non-key columns in this table (both columns are parts of the PK). Thus, partial dependencies cannot exist.
-- **3NF**: Since there are no non-key columns, transitive dependencies are impossible. The table is automatically in 3NF.
-
-### 4.5. Table: BOOKING
-- **1NF**: All attributes (dates, integers, status strings) are atomic.
-- **2NF**: The PK is a single auto-incrementing integer `booking_id`. All non-key columns (`space_code`, `requester_id`, `requested_start`, `requested_end`, `purpose`, `expected_participants`, `booking_status`, `created_at`, `approver_id`, `decision_time`, `decision_note`, `rejection_reason`) are fully functionally dependent on `booking_id`.
-- **3NF**: There are no transitive dependencies between non-key fields. For example, `approver_id` (representing the staff member) and `rejection_reason` depend directly on `booking_id` (the booking request). Although `rejection_reason` is only populated when `booking_status` = 'Rejected', this is a conditional business rule validation, not a functional dependency (a status of 'Rejected' does not determine the specific rejection text itself). All non-key columns depend only on the PK.
-
-### 4.6. Table: USAGESESSION
-- **1NF**: All timestamps, conditions, and notes are atomic.
-- **2NF**: The primary key is `booking_id`. Because the PK is a single column, no partial dependencies exist. All attributes depend fully on `booking_id`.
-- **3NF**: All columns (`check_in_staff_id`, `actual_start`, `initial_condition`, `check_out_staff_id`, `actual_end`, `final_condition`, `usage_notes`) depend directly on the booking event (`booking_id`). There is no transitive relationship where one staff member determines the checkout conditions or timestamps. All fields are directly dependent on the PK.
-
-### 4.7. Table: MAINTENANCERECORD
-- **1NF**: All columns (descriptions, timestamps, statuses, result notes) are atomic.
-- **2NF**: The PK is single-column `maintenance_id`. All non-key fields depend on the entire PK.
-- **3NF**: No transitive dependencies exist. The `assigned_staff_id` or `maintenance_status` depend directly on `maintenance_id` (the task record). While `completion_time` is only set when `maintenance_status` = 'Resolved', this is a process flow constraint, not a functional dependency. Every non-key attribute is dependent only on the PK.
-
----
-
-## 5. Traceability Matrix
+## 4. Traceability Matrix
 
 This matrix traces each mapped table, column, and constraint back to its source ERD attribute and BRA requirement section:
 
@@ -277,12 +236,12 @@ This matrix traces each mapped table, column, and constraint back to its source 
 
 ---
 
-## 6. Assumptions and Open Questions
+## 5. Assumptions and Open Questions
 
-### 6.1. Design Assumptions
+### 5.1. Design Assumptions
 1. **Soft Deletion Integrity**: To preserve historical logs (Requirement §18), users and spaces are never physically deleted. However, to cover database schema logic, mandatory foreign keys use `ON DELETE NO ACTION` to block invalid deletions, and nullable ones default to RESTRICT behavior.
 2. **Date Comparison Ordering**: Timestamps (`requested_start`, `requested_end`, `actual_start`, `actual_end`, `start_time`, `completion_time`) are assumed to be stored in standard database timezone formatting, verified by CHECK constraints preventing logical overlaps or negative durations.
 3. **Surrogate Key Auto-Incrementation**: `booking_id`, `facility_id`, and `maintenance_id` are designated as auto-incrementing identity values (`INT IDENTITY` in MS SQL Server) in the physical phase to guarantee unique primary keys.
 
-### 6.2. Open Questions
+### 5.2. Open Questions
 *No open questions remain as naming conventions, junction table keys, and referential behaviors have been explicitly resolved and approved by the stakeholders during the conceptual-to-logical design transition.*

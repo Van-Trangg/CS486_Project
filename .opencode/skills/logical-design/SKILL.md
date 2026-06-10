@@ -55,13 +55,7 @@ Ensure the logical design details the following constraints:
      - `USAGESESSION(actual_end)`: > `actual_start` (if not NULL)
      - `MAINTENANCERECORD(completion_time)`: > `start_time` (if not NULL)
 
-## 5. Normalization Assessment
-For each table, verify and justify normalization up to **Third Normal Form (3NF)**:
-1. **1NF**: Ensure all attributes are atomic, and there are no repeating groups.
-2. **2NF**: Ensure the table is in 1NF and all non-key attributes are fully functionally dependent on the entire primary key (no partial dependencies on composite PKs like in `SPACE_FACILITY`).
-3. **3NF**: Ensure the table is in 2NF and has no transitive dependencies (non-key attributes depend only on the primary key, not on other non-key attributes).
-
-## 6. Output Format
+## 5. Output Format
 Save the output to `outputs/03-logical-design-G02.md` using the following Markdown layout:
 
 ```markdown
@@ -101,12 +95,7 @@ Save the output to `outputs/03-logical-design-G02.md` using the following Markdo
 
 ---
 
-## 4. Normalization Assessment (3NF Verification)
-<Detailed evaluation of each of the 7 tables demonstrating compliance with 1NF, 2NF, and 3NF.>
-
----
-
-## 5. Traceability Matrix
+## 4. Traceability Matrix
 | Table Name | Column Name | ERD Attribute Source | BRA Requirement Reference | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 ```
