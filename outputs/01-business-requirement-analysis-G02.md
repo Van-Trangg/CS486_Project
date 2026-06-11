@@ -270,6 +270,7 @@ The following operational and data design assumptions are defined to supplement 
 6. **Time Order Constraint:** Booking requested start must be strictly before requested end (`requested_end > requested_start`). Similarly, actual start must be strictly before actual end, and maintenance start must be before completion.
 7. **Facility Catalog and Space Inventory:** The system stores facility types (e.g., Projector, Whiteboard, Microphone) as entries in a facility catalog rather than tracking individual physical equipment items. 
 8. **Department Representation:** Department information is stored as a descriptive text attribute within the User entity. The system does not manage departments as a separate entity because the requirements do not specify department-level operations, relationships, or reporting requirements.
+9. **Usage Session Creation:** A UsageSession is created when facility staff perform the check-in process for an approved booking. UsageSession records are not automatically created when booking requests are submitted. This ensures that UsageSession records represent actual room usage rather than planned reservations.
 ---
 
 ## 9. Open Questions
