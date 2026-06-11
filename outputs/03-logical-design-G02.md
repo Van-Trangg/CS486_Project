@@ -63,6 +63,9 @@ Associative table resolving the M:N relationship between `SPACE` and `FACILITY`.
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `space_code` | `VARCHAR(50)` | NOT NULL | PK, FK | FK references `SPACE(space_code)` | Reference to the physical space. |
 | `facility_id` | `INT` | NOT NULL | PK, FK | FK references `FACILITY(facility_id)` | Reference to the facility item. |
+| `quantity` | `INT` | NOT NULL | - | DEFAULT 1, CHECK > 0 | Total number of units of the facility in this space. |
+| `operation_status` | `VARCHAR(30)` | NOT NULL | - | DEFAULT 'Operational', CHECK | Operational status of the facility in this space. |
+| `description` | `NVARCHAR(500)` | NULL | - | - | Optional free-text status details or fault logs. |
 
 ### 2.5. Table: BOOKING
 Represents a space reservation request submitted by a user.
@@ -145,7 +148,15 @@ ALTER TABLE SPACE ADD CONSTRAINT CK_SPACE_CURRENT_STATUS CHECK (
 -- 3. FACILITY Table Constraints
 ALTER TABLE FACILITY ADD CONSTRAINT UQ_FACILITY_NAME UNIQUE (facility_name);
 
--- 4. BOOKING Table Constraints
+-- 4. SPACE_FACILITY Table Constraints
+ALTER TABLE SPACE_FACILITY ADD CONSTRAINT DF_SPACE_FACILITY_QUANTITY DEFAULT 1 FOR quantity;
+ALTER TABLE SPACE_FACILITY ADD CONSTRAINT CK_SPACE_FACILITY_QUANTITY CHECK (quantity > 0);
+ALTER TABLE SPACE_FACILITY ADD CONSTRAINT DF_SPACE_FACILITY_STATUS DEFAULT 'Operational' FOR operation_status;
+ALTER TABLE SPACE_FACILITY ADD CONSTRAINT CK_SPACE_FACILITY_STATUS CHECK (
+    operation_status IN ('Operational', 'Partially Operational', 'Broken')
+);
+
+-- 5. BOOKING Table Constraints
 ALTER TABLE BOOKING ADD CONSTRAINT DF_BOOKING_CREATED_AT DEFAULT GETDATE() FOR created_at;
 
 ALTER TABLE BOOKING ADD CONSTRAINT CK_BOOKING_TIME_ORDER CHECK (requested_end > requested_start);
@@ -160,10 +171,10 @@ ALTER TABLE BOOKING ADD CONSTRAINT CK_BOOKING_STATUS CHECK (
     booking_status IN ('Pending', 'Approved', 'Rejected', 'Cancelled', 'Checked In', 'Completed', 'No-Show')
 );
 
--- 5. USAGESESSION Table Constraints
+-- 6. USAGESESSION Table Constraints
 ALTER TABLE USAGESESSION ADD CONSTRAINT CK_USAGE_TIME_ORDER CHECK (actual_end > actual_start);
 
--- 6. MAINTENANCERECORD Table Constraints
+-- 7. MAINTENANCERECORD Table Constraints
 ALTER TABLE MAINTENANCERECORD ADD CONSTRAINT CK_MAINTENANCE_TIME_ORDER CHECK (completion_time > start_time);
 
 ALTER TABLE MAINTENANCERECORD ADD CONSTRAINT CK_MAINTENANCE_STATUS CHECK (
@@ -202,6 +213,9 @@ This matrix traces each mapped table, column, and constraint back to its source 
 | `FACILITY` | `facility_description` | `FACILITY.facility_description`| §4.3, §3.3 | Description of facility. Nullable. |
 | `SPACE_FACILITY`| `space_code` | - | §5.4, §6.4 | Composite PK Part 1, FK references SPACE. |
 | `SPACE_FACILITY`| `facility_id` | - | §5.4, §6.4 | Composite PK Part 2, FK references FACILITY. |
+| `SPACE_FACILITY`| `quantity` | - | - | Quantity of this facility type in the space. Default 1. CHECK > 0. |
+| `SPACE_FACILITY`| `operation_status`| - | - | Overall status of this facility type in the space. Default 'Operational'. CHECK constraint. |
+| `SPACE_FACILITY`| `description` | - | - | Optional free-text details about the facility's condition. |
 | `BOOKING` | `booking_id` | `BOOKING.booking_id` | §4.4, §3.4 | Primary Key. Auto-increment. |
 | `BOOKING` | `space_code` | `BOOKING.space_code` | §4.4, §3.4 | FK references SPACE. |
 | `BOOKING` | `requester_id` | `BOOKING.requester_id` | §4.4, §3.4 | FK references USER. |
