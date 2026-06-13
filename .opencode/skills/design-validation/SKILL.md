@@ -1,0 +1,262 @@
+---
+name: design-validation
+description: Instructs the agent to evaluate whether the Logical Database Design correctly represents the ERD, satisfies the Business Requirement Analysis (BRA), and uses appropriate keys, relationships, and constraints.
+compatibility: opencode
+---
+
+## 1. Purpose
+
+This skill instructs the agent to perform a formal validation of the database design.
+
+The objective is to determine whether the Logical Database Design:
+- Correctly represents the ERD.
+- Preserves the requirements defined in the BRA.
+- Satisfies the business rules defined in the BRA.
+- Uses appropriate keys and relationships.
+- Implements appropriate constraints.
+- Maintains traceability from requirements to schema elements.
+
+The validation process must identify strengths, weaknesses, risks, missing requirement coverage, and any business rules that are only partially enforced or require procedural/application-level implementation.
+---
+
+## 2. Required Inputs
+
+Before beginning, the agent MUST load and fully read:
+
+* `outputs/01-business-requirement-analysis-G02.md`
+* `outputs/02-erd-design-G02.md`
+* `outputs/03-logical-design-G02.md`
+
+If any required file is unavailable, halt and request it.
+
+Do not proceed from memory.
+
+---
+
+## 3. Execution Pipeline
+
+Execute the following stages in strict order.
+
+### Stage 1 — Entity Coverage Validation
+
+Compare the ERD against the Logical Database Design.
+
+For every ERD entity:
+
+* Verify a corresponding relational table exists.
+* Verify no ERD entity is omitted.
+* Verify no additional table exists without justification.
+
+Record:
+
+* Entity Name
+* Corresponding Table
+* Validation Status
+* Notes
+
+---
+
+### Stage 2 — Relationship Mapping Validation
+
+For every ERD relationship:
+
+Validate:
+
+* Cardinality preservation
+* Foreign key placement
+* Junction table implementation
+* Shared primary key implementation (where applicable)
+
+Expected mapping rules:
+
+| ERD Relationship | Expected Relational Mapping |
+| ---------------- | --------------------------- |
+| 1:N              | FK on N-side                |
+| M:N              | Junction Table              |
+| 1:1              | Shared PK or UNIQUE FK      |
+
+Identify any incorrect mappings.
+
+---
+
+### Stage 3 — Key Validation
+
+For every table:
+
+Validate:
+
+* Primary Keys
+* Foreign Keys
+* Composite Keys
+* Candidate Keys
+* Alternate Keys
+
+Determine whether the selected keys:
+
+* Uniquely identify records
+* Correctly support relationships
+* Match the ERD design
+
+---
+
+### Stage 4 — Constraint Validation
+
+Evaluate all constraints.
+
+Validate:
+
+* NOT NULL
+* UNIQUE
+* CHECK
+* DEFAULT
+* Referential Integrity Actions
+
+Determine whether each constraint correctly supports the intended requirement.
+
+---
+
+### Stage 5 — Business Rule Coverage Analysis
+
+Review every business rule identified in the BRA.
+
+For each business rule:
+
+Determine whether it is:
+
+* Fully Enforced
+* Partially Enforced
+* Not Enforced
+
+Possible enforcement mechanisms:
+
+* PK
+* FK
+* UNIQUE
+* CHECK
+* DEFAULT
+* Trigger
+* Stored Procedure
+* Application Logic
+
+If a business rule cannot be enforced through relational constraints alone, explicitly identify the limitation.
+
+Examples include:
+
+* Double-booking prevention
+* Capacity validation
+* Maintenance restrictions
+* Role-based approval restrictions
+
+---
+
+### Stage 6 — Traceability Validation
+
+Verify traceability:
+
+BRA Requirement
+→ ERD Element
+→ Relational Schema Element
+→ Constraint
+
+Identify any missing traceability links.
+
+---
+
+### Stage 7 — Overall Assessment
+
+Provide:
+
+* Strengths
+* Issues
+* Risks
+* Recommendations
+
+Conclude whether the design is:
+
+* Fully Valid
+* Conditionally Valid
+* Invalid
+
+---
+
+## 4. Output Format
+
+Produce the output as:
+
+# Step 4: Database Design Validation
+
+---
+
+## 1. Validation Scope
+
+---
+
+## 2. Entity Coverage Validation
+
+---
+
+## 3. Relationship Mapping Validation
+
+---
+
+## 4. Key Validation
+
+---
+
+## 5. Constraint Validation
+
+---
+
+## 6. Business Rule Coverage Analysis
+
+---
+
+## 7. Traceability Validation
+
+---
+
+## 8. Strengths
+
+---
+
+## 9. Issues and Risks
+
+---
+
+## 10. Recommendations
+
+---
+
+## 11. Conclusion
+
+Save output as:
+
+`outputs/04-design-validation-G02.md`
+
+---
+
+## 5. Critical Constraints
+
+1. Do not redesign the schema.
+
+2. Do not invent requirements that are not present in the BRA.
+
+3. Every finding must reference evidence from:
+
+   * BRA
+   * ERD
+   * Logical Design
+
+4. Clearly distinguish:
+
+   * Fully Satisfied Requirements
+   * Partially Satisfied Requirements
+   * Unsatisfied Requirements
+
+5. Missing business-rule enforcement must be explicitly documented.
+
+6. Validation findings must be evidence-based and traceable.
+
+7. Recommendations may suggest improvements but must not modify the original design automatically.
+
+8. Do not claim a business rule is enforced unless the enforcement mechanism can be identified.
