@@ -37,7 +37,7 @@ Do not proceed from memory.
 
 Execute the following stages in strict order.
 
-### Stage 1 — Entity Coverage Validation
+### Stage 1.1 — Entity Coverage Validation
 
 Compare the ERD against the Logical Database Design.
 
@@ -53,6 +53,14 @@ Record:
 * Corresponding Table
 * Validation Status
 * Notes
+
+### Stage 1.2 — Internal Consistency of Referential Actions
+
+Compare foreign key rules across related tables:
+
+- If a child table has `ON DELETE CASCADE` but the parent table’s business rule requires historical preservation (e.g., BR-18), flag as **High Risk**.
+- If two related tables have conflicting referential actions (e.g., `BOOKING` has `ON DELETE NO ACTION`, but `USAGESESSION` has `ON DELETE CASCADE` on `booking_id`), flag as **High Risk** and recommend alignment.
+- Document any inconsistency with exact excerpts from the logical design.
 
 ---
 
@@ -99,7 +107,7 @@ Determine whether the selected keys:
 
 ---
 
-### Stage 4 — Constraint Validation
+### Stage 4.1 — Constraint Validation
 
 Evaluate all constraints.
 
@@ -112,6 +120,14 @@ Validate:
 * Referential Integrity Actions
 
 Determine whether each constraint correctly supports the intended requirement.
+
+### Stage 4.2 — Referential Integrity & History Preservation
+
+If a table stores transactional history (e.g., `BOOKING`, `USAGESESSION`, `MAINTENANCERECORD`):
+
+- Check whether any foreign key referencing it uses `ON DELETE CASCADE`.
+- If yes, and the business requirement explicitly states "historical records must be preserved" (BR-18), then mark this as a **High Risk**.
+- Recommend removing `ON DELETE CASCADE` or using soft deletion (status flags) instead.
 
 ---
 
