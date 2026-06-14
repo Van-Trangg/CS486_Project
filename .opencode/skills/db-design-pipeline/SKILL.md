@@ -66,8 +66,15 @@ Translate the conceptual ERD design into a relational database schema.
 To design the logical schema, strictly follow instructions at:
 .opencode/skills/logical-design/SKILL.md
 
+After producing the logical schema, self-diagnose and cross-examine with BRA & ERD by following:
+.opencode/skills/logical-design-review/SKILL.md
+
+Verify and correct output (if applicable) using review from:
+docs\03-logical-design-review-G02.md
+
 Generate or update:
 outputs/03-logical-design-G02.md
+
 
 
 
