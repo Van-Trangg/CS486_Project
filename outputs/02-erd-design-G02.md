@@ -4,7 +4,13 @@
 
 ## 1. Design Decisions
 
-We utilize the crow's foot notation rendered via Mermaid's `erDiagram` for the Campus Space Management System, as it provides a clear, standardized representation of relationships and cardinalities. Multi-role relationships (such as User interacting as Requester, Approver, Reporter, etc.) are handled by defining distinct, labeled relationship lines for each role, ensuring that the specific function of the user in each context is explicit. Many-to-Many (M:N) relationships, specifically between `Space` and `Facility`, are managed by defining the relationship as specified, though Mermaid's `erDiagram` parser handles M:N visual rendering as a bridge in implementation (logical model). We adhere strictly to the cardinalities provided in the BRA to maintain data integrity and project requirements.
+This Entity-Relationship Diagram (ERD) is modeled using **Crow's Foot notation** and rendered dynamically as Mermaid `erDiagram` code. Crow's foot notation is selected because of its industry-standard capability to clearly represent minimum and maximum participation constraints. 
+
+To handle complex multi-role interactions where the `User` entity interacts with other entities under different roles, each role is represented as a distinct, individually labeled relationship line rather than collapsing them. This prevents ambiguity and preserves precise traceability back to the Business Requirement Analysis (BRA) document. 
+
+The many-to-many (M:N) relationship between `Space` and `Facility` is shown directly at the conceptual level in this ERD using standard crow's foot multiplicity lines. The creation of an associative/junction table to resolve this M:N relationship is deferred to the Step 3 Logical Design phase, ensuring the conceptual ERD remains faithful to the business view of the requirements.
+
+All entity names are represented in ALL_CAPS as single tokens to comply with Mermaid syntax. Attribute names and data types are mapped verbatim from the BRA §4, and all foreign keys (FK) are explicitly labeled.
 
 ---
 
@@ -85,22 +91,31 @@ erDiagram
     %% ── Relationships ─────────────────────────────────────────
     %% BRA §5.1 — User_Requests_Booking
     USER o{--|| BOOKING : "requests"
+
     %% BRA §5.2 — User_Approves_Booking
     USER o{--o| BOOKING : "approves"
+
     %% BRA §5.3 — Space_Hosts_Booking
     SPACE o{--|| BOOKING : "hosts"
+
     %% BRA §5.4 — Space_Equipped_With_Facility
     SPACE o{--o{ FACILITY : "contains"
+
     %% BRA §5.5 — Booking_Has_UsageSession
     BOOKING o|--|| USAGESESSION : "tracked by"
+
     %% BRA §5.6 — User_ChecksIn_UsageSession
     USER o{--|| USAGESESSION : "checks in"
+
     %% BRA §5.7 — User_ChecksOut_UsageSession
     USER o{--o| USAGESESSION : "checks out"
+
     %% BRA §5.8 — Space_Requires_Maintenance
     SPACE o{--|| MAINTENANCERECORD : "requires"
+
     %% BRA §5.9 — User_Reports_Maintenance
     USER o{--|| MAINTENANCERECORD : "reports"
+
     %% BRA §5.10 — User_Assigned_To_Maintenance
     USER o{--o| MAINTENANCERECORD : "assigned to"
 ```
@@ -111,91 +126,91 @@ erDiagram
 
 | # | Relationship Name | Entity A | Cardinality | Entity B | Notes |
 |---|---|---|---|---|---|
-| 1 | User_Requests_Booking | User | (0,N) : (1,1) | Booking | Requester role. |
-| 2 | User_Approves_Booking | User | (0,N) : (0,1) | Booking | Approver role. |
-| 3 | Space_Hosts_Booking | Space | (0,N) : (1,1) | Booking | Hosting role. |
-| 4 | Space_Equipped_With_Facility | Space | (0,M) : (0,N) | Facility | M:N relationship. |
-| 5 | Booking_Has_UsageSession | Booking | (0,1) : (1,1) | UsageSession | 1:1 relationship. |
-| 6 | User_ChecksIn_UsageSession | User | (0,N) : (1,1) | UsageSession | Check-in role. |
-| 7 | User_ChecksOut_UsageSession | User | (0,N) : (0,1) | UsageSession | Check-out role. |
-| 8 | Space_Requires_Maintenance | Space | (0,N) : (1,1) | MaintenanceRecord | Maintenance context. |
-| 9 | User_Reports_Maintenance | User | (0,N) : (1,1) | MaintenanceRecord | Reporter role. |
-| 10 | User_Assigned_To_Maintenance | User | (0,N) : (0,1) | MaintenanceRecord | Assigned staff role. |
+| 1 | User_Requests_Booking | User | (0,N) : (1,1) | Booking | A User requests 0..N Bookings; a Booking is requested by exactly 1 User. |
+| 2 | User_Approves_Booking | User | (0,N) : (0,1) | Booking | A User approves 0..N Bookings; a Booking is approved by 0..1 User (optional). |
+| 3 | Space_Hosts_Booking | Space | (0,N) : (1,1) | Booking | A Space hosts 0..N Bookings; a Booking is hosted in exactly 1 Space. |
+| 4 | Space_Equipped_With_Facility | Space | (0,M) : (0,N) | Facility | A Space contains 0..M Facilities; a Facility is contained in 0..N Spaces (M:N). |
+| 5 | Booking_Has_UsageSession | Booking | (0,1) : (1,1) | UsageSession | A Booking has 0..1 Usage Session; a Usage Session relates to exactly 1 Booking (1:1). |
+| 6 | User_ChecksIn_UsageSession | User | (0,N) : (1,1) | UsageSession | A User checks in 0..N Sessions; a Session is checked in by exactly 1 User (staff). |
+| 7 | User_ChecksOut_UsageSession | User | (0,N) : (0,1) | UsageSession | A User checks out 0..N Sessions; a Session is checked out by 0..1 User (optional). |
+| 8 | Space_Requires_Maintenance | Space | (0,N) : (1,1) | MaintenanceRecord | A Space has 0..N Maintenance Records; a Maintenance Record relates to exactly 1 Space. |
+| 9 | User_Reports_Maintenance | User | (0,N) : (1,1) | MaintenanceRecord | A User reports 0..N Maintenance Records; a Maintenance Record is reported by exactly 1 User. |
+| 10 | User_Assigned_To_Maintenance | User | (0,N) : (0,1) | MaintenanceRecord | A User is assigned to 0..N Maintenance Records; a Maintenance Record is assigned to 0..1 User (optional). |
 
 ---
 
 ## 4. Attribute Traceability
 
-### Entity: User
-| Attribute Name | Source |
-|---|---|
-| `user_id` | §4.1 |
-| `email` | §4.1 |
-| `full_name` | §4.1 |
-| `phone_number` | §4.1 |
-| `role` | §4.1 |
-| `department` | §4.1 |
-| `account_status` | §4.1 |
+### 4.1. `User` Entity Traceability
+| Attribute Name | Category | Data Type | Source (BRA) | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `user_id` | PK / Identifier | VARCHAR(50) | BRA §4.1 | Unique university account identifier. |
+| `email` | Descriptive | VARCHAR(150) | BRA §4.1 | Unique university email address. |
+| `full_name` | Descriptive | VARCHAR(150) | BRA §4.1 | User's full name. |
+| `phone_number` | Descriptive | VARCHAR(20) | BRA §4.1 | Contact phone number. Nullable. |
+| `role` | Descriptive | VARCHAR(50) | BRA §4.1 | Restricted to standard predefined roles. |
+| `department` | Descriptive | VARCHAR(100) | BRA §4.1 | Associated department within the university. |
+| `account_status` | Descriptive | VARCHAR(20) | BRA §4.1 | Status of the user account. |
 
-### Entity: Space
-| Attribute Name | Source |
-|---|---|
-| `space_code` | §4.2 |
-| `space_name` | §4.2 |
-| `space_type` | §4.2 |
-| `building` | §4.2 |
-| `floor` | §4.2 |
-| `room_number` | §4.2 |
-| `capacity` | §4.2 |
-| `current_status` | §4.2 |
-| `usage_policy` | §4.2 |
+### 4.2. `Space` Entity Traceability
+| Attribute Name | Category | Data Type | Source (BRA) | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `space_code` | PK / Identifier | VARCHAR(50) | BRA §4.2 | Unique identifier for the room. |
+| `space_name` | Descriptive | VARCHAR(100) | BRA §4.2 | Friendly name of the space. |
+| `space_type` | Descriptive | VARCHAR(50) | BRA §4.2 | Restricted to standard predefined space types. |
+| `building` | Descriptive | VARCHAR(50) | BRA §4.2 | Campus building name or code. |
+| `floor` | Descriptive | VARCHAR(10) | BRA §4.2 | Floor number. |
+| `room_number` | Descriptive | VARCHAR(20) | BRA §4.2 | Physical room number. |
+| `capacity` | Descriptive | INT | BRA §4.2 | Maximum allowed occupancy. |
+| `current_status` | Descriptive | VARCHAR(20) | BRA §4.2 | Current space availability status. |
+| `usage_policy` | Descriptive | NVARCHAR(MAX) | BRA §4.2 | Policy rules and priority guidelines. |
 
-### Entity: Facility
-| Attribute Name | Source |
-|---|---|
-| `facility_id` | §4.3 |
-| `facility_name` | §4.3 |
-| `facility_description` | §4.3 |
+### 4.3. `Facility` Entity Traceability
+| Attribute Name | Category | Data Type | Source (BRA) | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `facility_id` | PK / Identifier | INT | BRA §4.3 | Unique auto-incrementing catalog identifier. |
+| `facility_name` | Descriptive | VARCHAR(100) | BRA §4.3 | Unique name of facility item. |
+| `facility_description` | Descriptive | NVARCHAR(MAX) | BRA §4.3 | General specifications or notes. |
 
-### Entity: Booking
-| Attribute Name | Source |
-|---|---|
-| `booking_id` | §4.4 |
-| `space_code` | §4.4 (FK) |
-| `requester_id` | §4.4 (FK) |
-| `requested_start` | §4.4 |
-| `requested_end` | §4.4 |
-| `purpose` | §4.4 |
-| `expected_participants` | §4.4 |
-| `booking_status` | §4.4 |
-| `created_at` | §4.4 |
-| `approver_id` | §4.4 (FK) |
-| `decision_time` | §4.4 |
-| `decision_note` | §4.4 |
-| `rejection_reason` | §4.4 |
+### 4.4. `Booking` Entity Traceability
+| Attribute Name | Category | Data Type | Source (BRA) | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `booking_id` | PK / Identifier | INT | BRA §4.4 | Unique auto-incrementing booking identifier. |
+| `space_code` | FK | VARCHAR(50) | BRA §4.4 | Reference to booked `Space`. |
+| `requester_id` | FK | VARCHAR(50) | BRA §4.4 | Reference to requesting `User`. |
+| `requested_start` | Descriptive | DATETIME | BRA §4.4 | Requested start timestamp. |
+| `requested_end` | Descriptive | DATETIME | BRA §4.4 | Requested end timestamp. |
+| `purpose` | Descriptive | VARCHAR(100) | BRA §4.4 | Purpose of space booking. |
+| `expected_participants` | Descriptive | INT | BRA §4.4 | Projected attendee count. |
+| `booking_status` | Descriptive | VARCHAR(30) | BRA §4.4 | Current booking lifecycle status. |
+| `created_at` | Descriptive | DATETIME | BRA §4.4 | Booking creation timestamp. |
+| `approver_id` | FK | VARCHAR(50) | BRA §4.4 | Reference to reviewing `User`. Nullable. |
+| `decision_time` | Descriptive | DATETIME | BRA §4.4 | Time decision was made. Nullable. |
+| `decision_note` | Descriptive | NVARCHAR(MAX) | BRA §4.4 | Staff decision notes. Nullable. |
+| `rejection_reason` | Descriptive | VARCHAR(255) | BRA §4.4 | Populated if status is Rejected. Nullable. |
 
-### Entity: UsageSession
-| Attribute Name | Source |
-|---|---|
-| `booking_id` | §4.5 (PK, FK) |
-| `check_in_staff_id` | §4.5 (FK) |
-| `actual_start` | §4.5 |
-| `initial_condition` | §4.5 |
-| `check_out_staff_id` | §4.5 (FK) |
-| `actual_end` | §4.5 |
-| `final_condition` | §4.5 |
-| `usage_notes` | §4.5 |
+### 4.5. `UsageSession` Entity Traceability
+| Attribute Name | Category | Data Type | Source (BRA) | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `booking_id` | PK / FK | INT | BRA §4.5 | Reference to `Booking` (1:1 mapping). |
+| `check_in_staff_id` | FK | VARCHAR(50) | BRA §4.5 | Reference to checking-in `User`. |
+| `actual_start` | Descriptive | DATETIME | BRA §4.5 | Actual check-in timestamp. |
+| `initial_condition` | Descriptive | NVARCHAR(MAX) | BRA §4.5 | Room condition at check-in. |
+| `check_out_staff_id` | FK | VARCHAR(50) | BRA §4.5 | Reference to checking-out `User`. Nullable. |
+| `actual_end` | Descriptive | DATETIME | BRA §4.5 | Actual checkout timestamp. Nullable. |
+| `final_condition` | Descriptive | NVARCHAR(MAX) | BRA §4.5 | Room condition at checkout. Nullable. |
+| `usage_notes` | Descriptive | NVARCHAR(MAX) | BRA §4.5 | Additional notes or remarks. Nullable. |
 
-### Entity: MaintenanceRecord
-| Attribute Name | Source |
-|---|---|
-| `maintenance_id` | §4.6 |
-| `space_code` | §4.6 (FK) |
-| `reporter_id` | §4.6 (FK) |
-| `assigned_staff_id` | §4.6 (FK) |
-| `problem_type` | §4.6 |
-| `problem_description` | §4.6 |
-| `start_time` | §4.6 |
-| `completion_time` | §4.6 |
-| `maintenance_status` | §4.6 |
-| `result_note` | §4.6 |
+### 4.6. `MaintenanceRecord` Entity Traceability
+| Attribute Name | Category | Data Type | Source (BRA) | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `maintenance_id` | PK / Identifier | INT | BRA §4.6 | Unique auto-incrementing maintenance identifier. |
+| `space_code` | FK | VARCHAR(50) | BRA §4.6 | Reference to related `Space`. |
+| `reporter_id` | FK | VARCHAR(50) | BRA §4.6 | Reference to reporting `User`. |
+| `assigned_staff_id` | FK | VARCHAR(50) | BRA §4.6 | Reference to assigned technician `User`. Nullable. |
+| `problem_type` | Descriptive | VARCHAR(50) | BRA §4.6 | Type of reported facility issue. |
+| `problem_description` | Descriptive | NVARCHAR(MAX) | BRA §4.6 | Full details of the issue. |
+| `start_time` | Descriptive | DATETIME | BRA §4.6 | Maintenance start timestamp. |
+| `completion_time` | Descriptive | DATETIME | BRA §4.6 | Maintenance completion timestamp. Nullable. |
+| `maintenance_status` | Descriptive | VARCHAR(20) | BRA §4.6 | Current maintenance status. |
+| `result_note` | Descriptive | NVARCHAR(MAX) | BRA §4.6 | Repair outcome notes. Nullable. |

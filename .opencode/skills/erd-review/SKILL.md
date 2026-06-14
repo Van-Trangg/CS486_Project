@@ -69,7 +69,7 @@ For each entity, compare BRA §4 attributes against ERD attributes line by line:
 | `VARCHAR` without length specifier | e.g. bare `VARCHAR` with no `(n)` | Must match BRA exactly, e.g. `VARCHAR(50)` |
 
 
-**Pass condition:** All sub-checks pass for all 6 entities.
+**Pass condition:** All sub-checks pass for all entities.
 
 ---
 
