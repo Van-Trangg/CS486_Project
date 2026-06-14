@@ -113,6 +113,8 @@ This stage evaluates the declarative constraints implemented in the relational d
   * `SPACE_FACILITY` has `ON DELETE CASCADE` on both `space_code` and `facility_id` to prevent orphaned junction entries. (Valid)
   * `USAGESESSION` has `ON DELETE CASCADE` referencing `BOOKING` to clean up usage session details if a booking is deleted. (Identified as **High Risk** due to historical preservation violation of BR-18).
   * All other tables referencing `USER` or `SPACE` default to `ON DELETE NO ACTION` to prevent deletion of master records with transaction history, protecting auditability. (Valid)
+* **Future-Time Constraints (Stage 4.3):**
+  * `BOOKING.requested_start` represents a scheduled future event start. However, the logical design contains no `CHECK` constraint, trigger, or application-level rule to prevent setting a start time in the past for new records. This lack of constraint is a **Medium Risk** because it allows back-dated booking entries.
 
 ---
 
@@ -188,7 +190,8 @@ This stage evaluates the end-to-end traceability of business requirements from t
 3. **Double-Booking Vulnerability (High Risk — BR-11):** Static schema constraints cannot prevent two approved bookings from overlapping in the same room. Without procedural database triggers or application transaction locks, the system can suffer from concurrent booking conflicts.
 4. **Invalid Space Status Approvals (Medium Risk — BR-12):** Declaring a space 'Under Maintenance' or 'Retired' does not automatically block active bookings during that period. Approved bookings could theoretically be scheduled in rooms that are unavailable.
 5. **Capacity Over-allocation (Medium Risk — BR-19):** Users can successfully submit bookings where `expected_participants > capacity` of the requested space. This can cause physical overcrowding in classrooms or labs.
-6. **Conditional Nullability of Rejection Reason (Low Risk — BR-14):** The column `BOOKING.rejection_reason` is nullable. If a booking is rejected, there is no database-level check constraint forcing this field to be populated, potentially resulting in blank rejection notes.
+6. **Lack of Future-Time Constraints (Medium Risk — Stage 4.3):** The schema fails to prevent users from submitting booking requests with a `requested_start` timestamp in the past. This vulnerability allows invalid, back-dated bookings to be recorded in the database.
+7. **Conditional Nullability of Rejection Reason (Low Risk — BR-14):** The column `BOOKING.rejection_reason` is nullable. If a booking is rejected, there is no database-level check constraint forcing this field to be populated, potentially resulting in blank rejection notes.
 
 ---
 
@@ -285,6 +288,13 @@ ALTER TABLE BOOKING ADD CONSTRAINT CK_BOOKING_REJECTION_REASON
 CHECK (booking_status <> 'Rejected' OR rejection_reason IS NOT NULL);
 ```
 
+### Recommendation 5: Enforce Future-Time Constraint for Booking Requests
+To prevent users from back-dating booking requests (Stage 4.3), add a `CHECK` constraint on `requested_start` or enforce it at the application layer. In SQL Server, we can enforce that bookings must start on or after the current system date:
+```sql
+ALTER TABLE BOOKING ADD CONSTRAINT CK_BOOKING_FUTURE_START 
+CHECK (requested_start >= CAST(GETDATE() AS DATE));
+```
+
 ---
 
 ## 11. Conclusion
@@ -299,7 +309,8 @@ The logical schema perfectly normalizes the data to 3NF, implements highly compa
 However, it is classified as *Conditionally Valid* because:
 1. Critical referential actions defined on `USAGESESSION` (`ON DELETE CASCADE`) violate **BR-18** by risking the loss of historical space usage logs.
 2. Advanced scheduling and operational validations (double-booking prevention, maintenance blocking, and room capacity limits) cannot be enforced through declarative column constraints alone.
+3. The lack of future-time constraints on booking start times permits back-dated scheduling records.
 
 The design becomes **Fully Valid** once:
 * The `USAGESESSION` referential delete action is changed to `ON DELETE NO ACTION`.
-* The database triggers, scalar function constraints, and conditional check constraints detailed in Section 10 are implemented either directly in the database engine or strictly encapsulated within the application service layer.
+* The database triggers, scalar function constraints, conditional check constraints, and future-time validation rules detailed in Section 10 are implemented either directly in the database engine or strictly encapsulated within the application service layer.

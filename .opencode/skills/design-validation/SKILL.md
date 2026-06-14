@@ -129,6 +129,15 @@ If a table stores transactional history (e.g., `BOOKING`, `USAGESESSION`, `MAINT
 - If yes, and the business requirement explicitly states "historical records must be preserved" (BR-18), then mark this as a **High Risk**.
 - Recommend removing `ON DELETE CASCADE` or using soft deletion (status flags) instead.
 
+### Stage 4.3 — Future-Time Constraints (No Past-Dated Events)
+
+For any column that represents a scheduled or anticipated future timestamp (e.g., a start time of a booking, a deadline, an event time):
+
+- Check whether the logical design includes a constraint (CHECK, trigger, or application rule) that prevents the timestamp from being set to a value earlier than the current database time (`CURRENT_TIMESTAMP` or `GETDATE()`) for new records.
+- If no such constraint exists, and the column is used for future scheduling, mark this as a **Medium Risk**.
+- Recommendation: Add a `CHECK` constraint (e.g., `scheduled_start >= CAST(GETDATE() AS DATE)` for dates, or use a trigger for precise timestamps) or enforce it at the application layer.
+- Note: This is separate from ordering constraints (e.g., end > start), which are already validated elsewhere.
+
 ---
 
 ### Stage 5 — Business Rule Coverage Analysis
