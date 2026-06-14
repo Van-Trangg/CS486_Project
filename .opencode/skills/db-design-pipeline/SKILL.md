@@ -49,15 +49,15 @@ Requirements:
 # Step 2: Conceptual Design / ERD
 Create an ERD using Mermaid code to conceptualize the analysis obtained from the previous step.
 
-To design the ERD, strictly follow instructions at:
+To design the ERD, use:
 .opencode/skills/erd-design/SKILL.md
 
-After producing the ERD, self-diagnose and cross-examine with BRA by following:
+Then, self-diagnose and cross-examine generated ERD by using:
 .opencode/skills/erd-review/SKILL.md
 
-Verify and correct output (if applicable) using review from:
+Finally, using review from:
 docs\02-erd-design-review-G02.md
-
+If verdict is **NOT** "APPROVED", update or correct output at: outputs/01-business-requirement-analysis-G02.md
 
 # Step 3: Logical Database Design
 

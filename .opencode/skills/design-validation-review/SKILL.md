@@ -1,5 +1,5 @@
 ---
-name: design-validation-review
+name: db-review-step4
 description: Instructs the agent to act as an independent reviewer and systematically validate a database design validation report against the BRA, ERD, and Logical Design documents.
 compatibility: opencode
 ---

@@ -19,6 +19,7 @@ Always follow this order:
 2. Conceptual Database Design (ERD).
 3. Logical Database Design (Relational schema).
 4. Database Design Validation.
+5. Database Implementation
 
 Do not jump directly to DDL. The documents from the prior steps should be followed in the later steps.
 
@@ -28,6 +29,7 @@ Do not jump directly to DDL. The documents from the prior steps should be follow
 - `outputs/02-erd-design-G02.md`
 - `outputs/03-logical-design-G02.md`
 - `outputs/04-design-validation-G02.md`
+- `outputs/05-db-definition-G02.sql`
 
 ## DBMS
 
