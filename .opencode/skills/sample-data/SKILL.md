@@ -14,9 +14,9 @@ Before beginning, the agent MUST locate and fully read the following documents f
 
 | Input | Role |
 |---|---|
-| Step 5 DDL file (`05-db-definition-G*.sql`) | Authoritative schema: tables, columns, types, constraints, CHECK values, FK relationships, DEFAULT values |
-| Step 1 BRA file (`01-business-req-analysis-G*.md`) | Business purpose, entities, attributes, business rules, actor roles, status enumerations |
-| Step 3 Logical Design file (`03-logical-design-G*.md`) | Nullability rules, referential integrity actions, FK dependency order |
+| Step 5 DDL file (`05-db-definition-G02.sql`) | Authoritative schema: tables, columns, types, constraints, CHECK values, FK relationships, DEFAULT values |
+| Step 1 BRA file (`01-business-req-analysis-G02.md`) | Business purpose, entities, attributes, business rules, actor roles, status enumerations |
+| Step 3 Logical Design file (`03-logical-design-G02.md`) | Nullability rules, referential integrity actions, FK dependency order |
 
 If any file is absent from the outputs directory, halt and request it. Do not proceed from memory or assumption.
 
@@ -37,6 +37,7 @@ Read the DDL file completely. For every table, dynamically extract and record:
 - Which columns are IDENTITY / auto-increment
 
 This extracted information is the authoritative reference for all subsequent stages. Do not rely on memory for schema details.
+**Do not add any tables, columns, or constraints that are not explicitly defined in the DDL.**
 
 ### Stage 2 — Insertion Order Resolution
 From the FK relationships extracted in Stage 1, construct a valid topological insertion order so that every parent table is populated before any child table that references it. Record this order explicitly before proceeding.
@@ -47,7 +48,7 @@ If the schema contains circular FK references (rare), identify them and note tha
 Before writing any INSERT, produce an explicit coverage plan covering two dimensions:
 
 #### 3a. Enum Domain Coverage
-For every column with a CHECK constraint that restricts values to an enumerated set, list all allowed values. The sample data must include at least one row that uses each allowed value. No allowed value may be left unrepresented.
+For every column with a CHECK constraint that lists allowed values, the sample data MUST include at least one row using each allowed value. The agent must produce a coverage table before finalising the script. If any allowed value is missing, the generation is incomplete and must be corrected. The agent must maintain an explicit list of all allowed values for each enumerated column and check them off as rows are added. This list must be included in the verification report in Stage 5.1.
 
 #### 3b. Scenario Coverage
 Identify the full set of business scenarios the data must cover by reading BRA §7 (business rules) and §8 (assumptions). At minimum, plan for:
@@ -65,6 +66,8 @@ Identify the full set of business scenarios the data must cover by reading BRA �
 - At least one case where a business constraint *would* be violated if the system did not enforce it (e.g., a space that cannot be booked because it is unavailable — demonstrate this by having a space in that state with no conflicting approved bookings)
 - At least one record that has been soft-deleted or retired (if the BRA describes soft-deletion)
 - Any actor-specific restriction described in the BRA assumptions (e.g., only certain roles can approve) must be demonstrated correctly
+
+**Lookup Domain Coverage:** For any lookup table whose domain is explicitly enumerated in the BRA (e.g., FACILITY.facility_name from BRA §4.3, BOOKING.purpose from BRA §4.4, MAINTENANCERECORD.problem_type from BRA §4.6), the sample data MUST contain every value listed in the BRA, and MUST NOT contain any value not listed. The agent must extract the exact set of required values from the BRA and verify that the INSERT statements include exactly those values – no substitutions, abbreviations, or extra items.
 
 For each scenario, write a one-line description before writing data. The data must make every scenario unambiguously identifiable.
 
@@ -89,6 +92,7 @@ Before writing any INSERT, define and record the consistency rules that apply to
 - **Conditional field rules:** Any field that is described as "populated only when status is X" in the BRA must be NULL when the status is not X, and non-NULL when it is X.
 - **Conflict prevention rules:** Any business rule in the BRA that prevents two records from overlapping or conflicting (e.g., double-booking prevention) must be honoured in the data.
 - **Capacity or limit rules:** Any numeric constraint described in the BRA (e.g., participant count ≤ room capacity) must be satisfied.
+- **Lifecycle Consistency:** If a parent table has a status column where a specific value logically implies that no further action can occur (e.g., 'Cancelled', 'No-Show', 'Rejected', 'Closed'), then any child table that records subsequent steps MUST NOT contain a row referencing that parent. The agent must derive such implications from the business rules in the BRA.
 
 Apply all of these when writing data. Do not insert any row that violates them.
 
@@ -126,7 +130,9 @@ GO
 For other DBMS platforms, use the equivalent mechanism.
 
 **INSERT Format:**
-Use explicit column lists in every INSERT statement (never `INSERT INTO table VALUES (...)` without column names):
+Use explicit column lists in every INSERT statement (never `INSERT INTO table VALUES (...)` without column names). After each table's INSERT block, include a `GO` statement on its own line.
+
+Example:
 ```sql
 INSERT INTO [TABLENAME] (col1, col2, col3) VALUES
     (val1a, val2a, val3a),
@@ -155,7 +161,7 @@ After each INSERT block or group of related rows, add a brief comment identifyin
 -- [N2] Approved booking - room confirmed by staff
 -- [E3] Space under maintenance - no approved bookings should overlap
 ```
-
+The `.sql` file must **not** contain any markdown, HTML, or non‑SQL text outside of SQL comments (`--`). The verification report from Stage 5.1 must be included as SQL comments at the top of the file.
 ---
 
 ## 4. Data Realism Standards
@@ -172,11 +178,63 @@ Avoid: `'User1'`, `'test@test.com'`, `'Room A'`, `'note'`, `'description'`, or a
 ---
 
 ## 5. Self-Consistency Pre-Check
-Before writing the final output, verify:
+### 5.1 Mandatory Verification Output (as SQL Comments)
 
+Before generating the final SQL script, the agent MUST produce a verification report as **SQL comments** at the top of the `.sql` file. This report must be included **inside the output file** (not in a separate chat message or markdown file).
+
+The report must include:
+
+- **Enum Coverage Report** – For each table and column with a CHECK constraint, list all allowed values and mark which are present using SQL comments (`--`).
+- **Lookup Domain Coverage Report** – For each lookup table that has a defined set of values in the BRA, list all required values and mark which are present.
+- **Verification Checklist** – A checklist of all items from Section 5.2, each marked `[x]` or `[ ]` as applicable.
+
+The report must be placed immediately after the file header and before the `-- Cleanup` section. Example format:
+
+```sql
+-- ============================================================
+-- Database: <Project Name>
+-- Platform: <DBMS>
+-- Group: G02
+-- Step 6: Sample Data Preparation
+-- ============================================================
+--
+-- VERIFICATION REPORT
+-- ============================================================
+-- Enum Coverage Report:
+--   USER.role: Student[x], Lecturer[x], Teaching Assistant[x],
+--              Facility Staff[x], Department Administrator[x], Facility Manager[x] -> PASS
+--   ...
+--
+-- Lookup Domain Coverage Report:
+--   FACILITY (BRA §4.3): Projector[x], Whiteboard[x], Microphone[x],
+--                        Computer[x], Livestreaming Equipment[x], Air Conditioner[x] -> PASS
+--   ...
+--
+-- Verification Checklist:
+--   [x] Insertion order follows topological FK dependency order
+--   [x] Every enum column has all allowed values
+--   ...
+-- ============================================================
+-- Cleanup
+-- ============================================================
+```
+Only after the verification report shows all checks PASS may the agent write the INSERT statements below.
+---
+### 5.2 Verification Checklist
+
+**Mandatory Enforcement – Before Saving Output**
+
+1. For every column with a CHECK constraint, the agent MUST **count the distinct values** that actually appear in the generated `INSERT` statements.
+2. Compare the distinct set against the full list of allowed values extracted from the DDL.
+3. If any allowed value is missing, the agent MUST **automatically add** the missing rows (or update existing ones) to include every missing value.
+4. After adding missing data, **re-run all verification checks** (foreign keys, uniqueness, time ordering, conditional rules, etc.).
+5. Only when **all checklist items pass** and **no enum value remains missing** may the agent save the final `.sql` file.
+
+**Strict Prohibition:** The agent must NEVER mark a check as `PASS` when the actual data does not satisfy the requirement. Any discrepancy between the verification report and the actual data is a critical error.
 ```
 [ ] Insertion order follows topological FK dependency order
 [ ] Every enum column has all its allowed values represented at least once
+[ ] Every lookup table that has a defined domain in the BRA (e.g., facility types, problem categories, purpose lists) contains **all** values listed in the BRA, not just a subset. For each such table, the agent must produce a list of required values from the BRA and compare against the inserted rows. If any required value is missing, the script is incomplete.
 [ ] Every nullable column has at least one NULL and one non-NULL row
 [ ] Every business scenario from Stage 3b is present and identifiable
 [ ] No two rows violate any uniqueness constraint (PK, composite PK, UNIQUE)

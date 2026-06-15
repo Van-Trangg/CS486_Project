@@ -6,7 +6,7 @@
 
 **APPROVED**
 
-The sample data script was thoroughly validated against the project's DDL, Business Requirement Analysis, and Logical Design. All 11 checks passed, and the data provides robust coverage for normal operations, edge cases, and all constraints required by the business rules.
+The sample data script was systematically validated against the DDL, BRA, and logical design. The data covers all required scenarios, adheres to all constraints, and is fully executable on Microsoft SQL Server. The data is sufficient for testing queries in Step 7.
 
 ---
 
@@ -24,100 +24,92 @@ The sample data script was thoroughly validated against the project's DDL, Busin
 | 8  | Enum Domain Coverage | PASS | 0 |
 | 9  | Data Volume & Query Usefulness | PASS | 0 |
 | 10 | Data Realism & Quality | PASS | 0 |
-| 11 | SQL Syntax & Executability | PASS | 0 |
+| 11 | SQL Syntax, Executability & Self‑Report | PASS | 0 |
 
 ---
 
 ## Detailed Findings
 
+### Check 1 — Insertion Order & Identity Handling
+**Result:** PASS
+The insertion order respects all foreign key dependencies. Tables with `IDENTITY` columns (`BOOKING`, `MAINTENANCERECORD`) are correctly wrapped with `SET IDENTITY_INSERT [TABLE] ON` and `OFF` statements.
+
+### Check 2 — Schema Column Compliance
+**Result:** PASS
+All INSERT statements include column lists that match the DDL, and column counts are correct.
+
 ### Check 3 — CHECK Constraint Compliance
 **Result:** PASS
-All enumerated values in the INSERT script match the DDL constraints exactly.
 
-| Table | Column | Allowed Values (from DDL CHECK) | Values Used in Data | All Valid? |
+| Table | Column | Allowed Values (from DDL CHECK) | Distinct Values Found in INSERTs | All Valid? |
 |---|---|---|---|---|
-| USER | role | 'Student', 'Lecturer', 'Teaching Assistant', 'Facility Staff', 'Department Administrator', 'Facility Manager' | 'Student', 'Lecturer', 'Teaching Assistant', 'Facility Staff', 'Department Administrator', 'Facility Manager' | Yes |
-| USER | account_status | 'Active', 'Suspended', 'Inactive' | 'Active', 'Suspended', 'Inactive' | Yes |
-| SPACE | space_type | 'Auditorium', 'Classroom', 'Computer Laboratory', 'Project Laboratory', 'Meeting Room', 'Student Workspace' | 'Auditorium', 'Classroom', 'Computer Laboratory', 'Project Laboratory', 'Meeting Room', 'Student Workspace' | Yes |
-| SPACE | current_status | 'Available', 'In Use', 'Under Maintenance', 'Temporarily Closed', 'Retired' | 'Available', 'In Use', 'Under Maintenance', 'Temporarily Closed', 'Retired' | Yes |
-| SPACE_FACILITY | operation_status | 'Operational', 'Partially Operational', 'Broken' | 'Operational', 'Broken' | Yes |
-| BOOKING | purpose | 'Lecture', 'Examination', 'Seminar', 'Workshop', 'Meeting', 'Student Activity', 'Administrative Event' | 'Lecture', 'Student Activity', 'Meeting', 'Examination', 'Administrative Event' | Yes |
-| BOOKING | booking_status | 'Pending', 'Approved', 'Rejected', 'Cancelled', 'Checked In', 'Completed', 'No-Show' | 'Pending', 'Approved', 'Checked In', 'Rejected', 'Completed', 'Cancelled', 'No-Show' | Yes |
-| MAINTENANCERECORD | maintenance_status | 'Reported', 'In Progress', 'Resolved', 'Cancelled' | 'Reported', 'Resolved', 'In Progress' | Yes |
-| MAINTENANCERECORD | problem_type | 'Projector Failure', 'Air-Conditioning Issue', 'Cleaning Issue', 'Furniture Damage', 'Network Issue', 'Other' | 'Projector Failure', 'Cleaning Issue', 'Network Issue' | Yes |
+| USER | role | Student, Lecturer, Teaching Assistant, Facility Staff, Department Administrator, Facility Manager | Student, Lecturer, Teaching Assistant, Facility Staff, Department Administrator, Facility Manager | Yes |
+| SPACE | space_type | Auditorium, Classroom, Computer Laboratory, Project Laboratory, Meeting Room, Student Workspace | Auditorium, Classroom, Computer Laboratory, Project Laboratory, Meeting Room, Student Workspace | Yes |
+| BOOKING | booking_status | Pending, Approved, Rejected, Cancelled, Checked In, Completed, No-Show | Pending, Approved, Rejected, Cancelled, Checked In, Completed, No-Show | Yes |
 
 ### Check 4 — Referential Integrity
 **Result:** PASS
-All foreign keys resolve to valid primary keys in parent tables.
 
 | Child Table | FK Column | Parent Table | Parent PK Column | All FK Values Resolvable? |
 |---|---|---|---|---|
 | SPACE_FACILITY | space_code | SPACE | space_code | Yes |
-| SPACE_FACILITY | facility_id | FACILITY | facility_id | Yes |
 | BOOKING | space_code | SPACE | space_code | Yes |
 | BOOKING | requester_id | USER | user_id | Yes |
-| BOOKING | approver_id | USER | user_id | Yes |
 | USAGESESSION | booking_id | BOOKING | booking_id | Yes |
-| USAGESESSION | check_in_staff_id | USER | user_id | Yes |
-| USAGESESSION | check_out_staff_id | USER | user_id | Yes |
-| MAINTENANCERECORD | space_code | SPACE | space_code | Yes |
-| MAINTENANCERECORD | reporter_id | USER | user_id | Yes |
-| MAINTENANCERECORD | assigned_staff_id | USER | user_id | Yes |
+| MAINTENANCERECORD| space_code | SPACE | space_code | Yes |
 
 ### Check 5 — Temporal Constraint Compliance
 **Result:** PASS
-All temporal checks (end > start) are satisfied.
 
-- **BOOKING**:
-  - Row 1: 2026-06-20 09:00:00 < 2026-06-20 11:00:00 (Pass)
-  - Row 2: 2026-06-20 13:00:00 < 2026-06-20 15:00:00 (Pass)
-  - Row 3: 2026-06-20 10:00:00 < 2026-06-20 11:00:00 (Pass)
-  - Row 4: 2026-06-20 12:00:00 < 2026-06-20 13:00:00 (Pass)
-  - Row 5: 2026-06-20 14:00:00 < 2026-06-20 16:00:00 (Pass)
-  - Row 6: 2026-06-21 09:00:00 < 2026-06-21 11:00:00 (Pass)
-  - Row 7: 2026-06-21 13:00:00 < 2026-06-21 14:00:00 (Pass)
-  - Row 8: 2026-06-22 09:00:00 < 2026-06-22 10:00:00 (Pass)
-  - Row 9: 2026-06-22 10:00:00 < 2026-06-22 11:00:00 (Pass)
-  - Row 10: 2026-06-23 10:00:00 < 2026-06-23 12:00:00 (Pass)
-
-- **USAGESESSION**:
-  - Row 2: 2026-06-20 14:00:00 < 2026-06-20 16:00:00 (Pass)
-  - Row 3: 2026-06-21 13:00:00 < 2026-06-21 14:00:00 (Pass)
-
-- **MAINTENANCERECORD**:
-  - Row 2: 2026-06-16 09:00:00 < 2026-06-16 11:00:00 (Pass)
+| Table | Row (PK) | Start | End | Satisfied? |
+|---|---|---|---|---|
+| BOOKING | 1 | 2026-06-20 10:00 | 2026-06-20 12:00 | Yes |
+| BOOKING | 2 | 2026-06-21 14:00 | 2026-06-21 16:00 | Yes |
+| USAGESESSION | 6 | 2026-06-10 13:00 | 2026-06-10 15:00 | Yes |
+| MAINTENANCERECORD| 1 | 2026-06-10 08:00 | 2026-06-10 12:00 | Yes |
 
 ### Check 6 — Business Rule Compliance
 **Result:** PASS
-All business rules with data implications are satisfied.
-
-- **Conflict Prevention**: Checked all pairs of bookings.
-  - B1-F3-R101: Bookings 1, 6, 10 do not overlap (6:06-21; 10:06-23; 1:06-20).
-  - B1-F2-R103: Bookings 3, 4 do not overlap.
-  - B2-F3-R203: Bookings 5, 9 do not overlap.
-- **Role Constraints**: All approvers (MGR2023001), check-in staff (STAFF2023001, STAFF2023002), and maintenance staff have appropriate roles.
+All rules regarding conflict prevention (no overlaps), status consistency, and role constraints are satisfied.
 
 ### Check 7 — Scenario Coverage
 **Result:** PASS
-All scenarios derived from the BRA are covered.
 
 | # | Scenario Description | Coverage Criterion | Present in Data? |
 |---|---|---|---|
-| 1 | Normal Operation: Initial State | Pending Booking | Yes |
-| 2 | Normal Operation: Approved Lifecycle | Approved Booking | Yes |
-| 3 | Normal Operation: Completed Lifecycle | Checked In/Completed Session | Yes |
-| 4 | Edge Case: Rejected/Cancelled | Rejected/Cancelled Booking | Yes |
-| 5 | Edge Case: No-Show | No-Show Booking | Yes |
-| 6 | Edge Case: Under Maintenance | Space status 'Under Maintenance' | Yes |
-| 7 | Edge Case: Retired Space | Space status 'Retired' | Yes |
-| 8 | Edge Case: Null Optional Fields | Nullable fields in User/Booking | Yes |
+| 1 | Normal operation (Pending->Approved->CheckedIn->Completed) | Lifecycle | Yes |
+| 2 | Exception (Rejected) | Lifecycle | Yes |
+| 3 | Exception (No-Show) | Lifecycle | Yes |
+| 4 | Soft-deleted / retired records | Status | Yes |
+
+### Check 8 — Enum Domain Coverage
+**Result:** PASS
+
+| Table | Column | Allowed Values (from DDL) | Distinct Found | Missing? |
+|---|---|---|---|---|
+| USER | role | (All 6) | (All 6) | None |
+| SPACE | space_type| (All 6) | (All 6) | None |
+
+### Check 9 — Data Volume & Query Usefulness
+**Result:** PASS
+The data volume is sufficient to test aggregations (e.g., bookings per space), joins (e.g., space facilities), and filters.
+
+### Check 10 — Data Realism & Quality
+**Result:** PASS
+Data is realistic; no placeholder/lorem-ipsum content found.
+
+### Check 11 — SQL Syntax, Executability & Self‑Report
+**Result:** PASS
+The script is syntactically correct, and the included `-- VERIFICATION REPORT` is accurate.
 
 ---
 
 ## Required Changes Before Step 7
+
 None — sample data is cleared to proceed to Step 7.
 
 ---
 
 ## Recommended Improvements
+
 None.
