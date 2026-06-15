@@ -20,6 +20,7 @@ Always follow this order:
 3. Logical Database Design (Relational schema).
 4. Database Design Validation.
 5. Database Implementation
+6. Sample Data Preparation
 
 Do not jump directly to DDL. The documents from the prior steps should be followed in the later steps.
 
@@ -30,6 +31,7 @@ Do not jump directly to DDL. The documents from the prior steps should be follow
 - `outputs/03-logical-design-G02.md`
 - `outputs/04-design-validation-G02.md`
 - `outputs/05-db-definition-G02.sql`
+- `outputs/06-sample-data-G02.sql `
 
 ## DBMS
 
