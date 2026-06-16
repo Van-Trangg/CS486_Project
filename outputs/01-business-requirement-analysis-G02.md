@@ -26,11 +26,11 @@ The system supports several user roles with specific permissions and responsibil
 
 | Actor Name | Description | Responsibilities |
 | :--- | :--- | :--- |
-| **Student** | Active students within the university who require spaces for projects, group studies, or extracurricular activities. | <ul><li>Submit booking requests for student activities or project workspaces.</li><li>View own booking history and space avaibility.</li></ul> |
-| **Lecturer** | Academic faculty members who require spaces for classes, seminars, or academic events. | <ul><li>Submit booking requests for lectures, exams, seminars, or workshops.</li><li>View own booking history and space availability.</li></ul> |
-| **Teaching Assistant (TA)** | Academic support staff assisting lecturers in courses and student projects. | <ul><li>Submit booking requests for labs, tutorials, or student project consultations.</li><li>View own booking history and space availability.</li></ul> |
+| **Student** | Active students within the university who require spaces for projects, group studies, or extracurricular activities. | <ul><li>Submit booking requests for student activities or project workspaces.</li><li>View booking history, check space availability, and cancel their own eligible booking requests.</li></ul> |
+| **Lecturer** | Academic faculty members who require spaces for classes, seminars, or academic events. | <ul><li>Submit booking requests for lectures, exams, seminars, or workshops.</li><li>View booking history, check space availability, and cancel their own eligible booking requests.</li></ul> |
+| **Teaching Assistant (TA)** | Academic support staff assisting lecturers in courses and student projects. | <ul><li>Submit booking requests for labs, tutorials, or student project consultations.</li><li>View booking history, check space availability, and cancel their own eligible booking requests.</li></ul> |
 | **Facility Staff** | Dedicated personnel responsible for the day-to-day operations and upkeep of the campus spaces. | <ul><li>Review, approve, or reject standard booking requests.</li><li>Perform physical check-ins for arriving requesters, recording start times and initial room condition.</li><li>Record session completion, actual end times, and final room condition.</li><li>Report space issues and perform/resolve assigned maintenance.</li><li>View booking history, upcoming bookings, no-show bookings, and spaces under maintenance.</li></ul> |
-| **Department Administrator** | Administrative staff coordinating departmental events and academic scheduling. | <ul><li>Submit booking requests for administrative events or departmental workshops.</li><li>View scheduled bookings and space availability.</li></ul> |
+| **Department Administrator** | Administrative staff coordinating departmental events and academic scheduling. | <ul><li>Submit booking requests for administrative events or departmental workshops.</li><li>View booking history, check space availability, and cancel their own eligible booking requests.</li></ul> |
 | **Facility Manager** | Administrative lead with full administrative oversight of all spaces, facilities, and personnel. | <ul><li>Configure spaces, facilities, and policies.</li><li>Review, approve, or reject high-priority or standard booking requests.</li><li>Assign facility staff to maintenance tasks.</li><li>Full access to booking history, maintenance logs, utilization reports, and system configuration.</li></ul> |
 
 ---
@@ -255,6 +255,8 @@ The following explicit business rules are derived directly from the requirement 
 18. **Historical and Operational Reports:** The system must preserve logs and support viewing booking history, upcoming events, active maintenance, and no-show counts.
     - *Requirement Text:* "The system should keep historical records of bookings and maintenance activities. Staff should be able to view booking history, upcoming bookings, spaces under maintenance, and no-show bookings." (line 18)
 19. **Capacity Limit Rule:** Expected participant count must not exceed the capacity of the selected space.
+20. **Future Booking Requirement:** Students and lecturers may only submit booking requests for future time periods. Booking requests with a requested start time earlier than the current system time are not permitted.
+21. **Booking Cancellation Rule:** A booking may be cancelled only if the booking status is `Pending`, or `Approved`. Cancelled bookings shall remain stored in the system to preserve historical records and auditability.
 ---
 
 ## 8. Assumptions
