@@ -17,6 +17,15 @@ Execute the following stages in strict order. Do not skip or reorder steps.
 ### Stage 1 — Entity Inventory
 Scan §3 of the BRA. Dynamically extract the complete list of all candidate entities along with their identified Primary Keys (PKs). Verify the total entity count before proceeding.
 
+**Junction entity exclusion rule:** Exclude any entity that is a junction (associative) entity rather than a true conceptual entity. Identify a junction entity by structural pattern, not by name:
+- It is not given its own dedicated entry in §3 with a description and independent business justification — it is only mentioned in passing within a relationship's cardinality justification (§6) or relationship description (§5), typically to explain how an M:N relationship will be resolved at the logical design stage.
+- Its only attributes, if mentioned at all, are foreign keys referencing the two entities it bridges, with no descriptive attributes of its own.
+- It exists solely to resolve a many-to-many relationship between two entities that are each independently defined in §3.
+
+If an entity matches this pattern, do not create a Mermaid entity block for it. Instead, represent the relationship it bridges as a direct M:N line between the two true entities (see Stage 3). This is a conceptual-level decision: associative tables are a logical/relational implementation detail and do not belong in the conceptual ERD.
+
+If an entity has its own dedicated §3 entry with a description and business justification independent of any single relationship, it is a true entity — include it even if it also happens to sit between two other entities.
+
 ### Stage 2 — Attribute Mapping
 For each identified entity, map every attribute listed in §4 of the BRA. 
 - Preserve every attribute name exactly as written in the BRA. Do not rename,
