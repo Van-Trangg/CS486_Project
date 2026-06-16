@@ -32,14 +32,40 @@ entity names, and attribute names.
 ### Check 1 — Entity Completeness
 **Procedure:**
 1. Extract the list of entity names from BRA §3 and keep track of count (important)
-2. Extract the list of entity names from the ERD Mermaid block.
-3. Compare. Flag any entity present in BRA but absent in ERD (omission) or present in
-   ERD but absent in BRA (invention).
+2. From that list, identify and set aside any junction (associative) entity using the
+   structural test below — these are correctly excluded from the ERD and must NOT be
+   counted as omissions.
+3. Extract the list of entity names from the ERD Mermaid block.
+4. Compare the ERD entity set against the BRA §3 entity set **minus** any identified
+   junction entities. Flag any true entity present in BRA but absent in ERD (omission),
+   or any entity present in ERD but absent from BRA (invention).
 
-**Pass condition:** ERD entity set = BRA entity set exactly. Count must match.
+**Junction entity structural test** (apply to every BRA §3 entry before comparing):
+An entity is a junction entity — and therefore correctly excluded from the conceptual
+ERD — if it exhibits this pattern:
+- It has no dedicated §3 entry with its own description and independent business
+  justification; it is only mentioned in passing within a relationship's cardinality
+  justification (§6) or relationship description (§5), typically as the resolution
+  mechanism for an M:N relationship.
+- Its only attributes, if mentioned at all, are foreign keys referencing the two entities
+  it bridges, with no descriptive attributes of its own.
+- It exists solely to resolve an M:N relationship between two entities that are each
+  independently and fully defined in §3.
+
+If an entity has its own dedicated §3 entry with a real description and standalone
+justification, it is a true entity and must appear in the ERD — even if it also sits
+between two other entities in a relationship.
+
+**Pass condition:** ERD entity set = (BRA §3 entity set minus correctly-excluded junction
+entities). Count must match after junction entities are excluded from the BRA side.
 
 **Common failure modes:**
-- Logical-level constructs that are not an conceptual entity in the BRA is included and added into the ERD.
+- A junction entity is included in the ERD as its own entity block — this is a FAIL,
+  since the M:N relationship should instead be represented as a direct line between
+  the two true entities it bridges.
+- A junction entity is incorrectly excluded by the reviewer when it actually has its own
+  dedicated §3 entry with independent justification — this is a false PASS and must be
+  corrected; re-apply the structural test before excluding anything.
 - An entity from BRA §3 missing from the Mermaid block.
 
 ---
