@@ -31,7 +31,8 @@
 --   [x] All FK values resolve to existing PK values in parent tables
 --   [x] All time orderings valid (end > start for all non-NULL pairs)
 --   [x] All conflict-prevention rules honoured (no overlapping approved records, etc.)
---   [x] All conditional field rules honoured (fields NULL/non-NULL per their conditions)
+--   [x] All bookings start in the future relative to their creation timestamp (BR-20)
+--   [x] All booking cancellations and audits respect state transition/delete trigger rules (BR-21)
 --   [x] All capacity or limit constraints satisfied
 --   [x] IDENTITY_INSERT ON/OFF wraps all identity table inserts
 --   [x] Aggregation queries on this data would return non-trivial, varied results
@@ -137,7 +138,7 @@ INSERT INTO [MAINTENANCERECORD] (maintenance_id, space_code, reporter_id, assign
     (2, 'CS-B2-R202', 'STAFF2023004', 'STAFF2023004', 'Air-Conditioning Issue', 'AC blowing warm air.', '2026-06-12 09:00:00', NULL, 'Reported', NULL),
     (3, 'CS-B3-R302', 'STU2023001', 'STAFF2023004', 'Cleaning Issue', 'Room needs cleaning after event.', '2026-06-13 09:00:00', '2026-06-13 10:00:00', 'Resolved', 'Cleaned.'),
     (4, 'CS-B2-R201', 'STAFF2023004', 'STAFF2023004', 'Furniture Damage', 'Broken chair.', '2026-06-14 09:00:00', NULL, 'In Progress', NULL),
-    (5, 'CS-B1-R102', 'LEC2023002', NULL, 'Network Issue', 'Slow internet connectivity.', '2026-06-15 08:00:00', NULL, 'Reported', NULL),
+    (5, 'CS-B1-R102', 'LEC2023002', 'STAFF2023004', 'Network Issue', 'Slow internet connectivity.', '2026-06-15 08:00:00', '2026-06-15 10:00:00', 'Resolved', 'Replaced faulty ethernet cable.'),
     (6, 'CS-B1-R101', 'STAFF2023004', 'STAFF2023004', 'Other', 'Strange noise.', '2026-06-14 10:00:00', NULL, 'Cancelled', 'Resolved by staff.');
 SET IDENTITY_INSERT [MAINTENANCERECORD] OFF;
 GO

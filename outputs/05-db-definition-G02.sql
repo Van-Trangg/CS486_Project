@@ -7,6 +7,14 @@
 -- ============================================================
 
 -- Cleanup Section (Reverse Dependency Order)
+DROP TRIGGER IF EXISTS TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE;
+DROP TRIGGER IF EXISTS TR_BOOKING_STATUS_AND_AUDIT;
+GO
+
+IF OBJECT_ID('dbo.fn_CheckSpaceCapacity', 'FN') IS NOT NULL
+    DROP FUNCTION dbo.fn_CheckSpaceCapacity;
+GO
+
 DROP TABLE IF EXISTS [MAINTENANCERECORD];
 DROP TABLE IF EXISTS [USAGESESSION];
 DROP TABLE IF EXISTS [BOOKING];
@@ -114,6 +122,24 @@ CREATE TABLE [MAINTENANCERECORD] (
 );
 GO
 
+-- UDF Definitions
+GO
+CREATE FUNCTION dbo.fn_CheckSpaceCapacity (@SpaceCode VARCHAR(50), @Participants INT)
+RETURNS BIT
+AS
+BEGIN
+    DECLARE @Capacity INT;
+    DECLARE @Result BIT = 1;
+    
+    SELECT @Capacity = capacity FROM [SPACE] WHERE space_code = @SpaceCode;
+    
+    IF @Participants > @Capacity
+        SET @Result = 0;
+        
+    RETURN @Result;
+END;
+GO
+
 -- Constraint Definitions
 ALTER TABLE [USER] ADD CONSTRAINT UQ_USER_EMAIL UNIQUE ([email]);
 
@@ -153,6 +179,9 @@ ALTER TABLE [BOOKING] ADD CONSTRAINT CK_BOOKING_PURPOSE CHECK (
 ALTER TABLE [BOOKING] ADD CONSTRAINT CK_BOOKING_STATUS CHECK (
     [booking_status] IN ('Pending', 'Approved', 'Rejected', 'Cancelled', 'Checked In', 'Completed', 'No-Show')
 );
+ALTER TABLE [BOOKING] ADD CONSTRAINT CK_BOOKING_FUTURE_START CHECK ([requested_start] >= [created_at]);
+ALTER TABLE [BOOKING] ADD CONSTRAINT CK_BOOKING_REJECTION_REASON CHECK ([booking_status] <> 'Rejected' OR [rejection_reason] IS NOT NULL);
+ALTER TABLE [BOOKING] ADD CONSTRAINT CK_BOOKING_CAPACITY_LIMIT CHECK (dbo.fn_CheckSpaceCapacity([space_code], [expected_participants]) = 1);
 
 ALTER TABLE [USAGESESSION] ADD CONSTRAINT CK_USAGE_TIME_ORDER CHECK ([actual_end] > [actual_start]);
 
@@ -212,4 +241,80 @@ ALTER TABLE [MAINTENANCERECORD] ADD CONSTRAINT FK_MAINTENANCERECORD_USER_REPORTE
 ALTER TABLE [MAINTENANCERECORD] ADD CONSTRAINT FK_MAINTENANCERECORD_USER_STAFF
     FOREIGN KEY ([assigned_staff_id]) REFERENCES [USER] ([user_id])
     ON DELETE NO ACTION ON UPDATE NO ACTION;
+GO
+
+-- Trigger Definitions
+CREATE TRIGGER TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE
+ON [BOOKING]
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1 
+        FROM inserted i
+        JOIN [SPACE] s ON i.space_code = s.space_code
+        WHERE i.booking_status = 'Approved'
+          AND (
+              s.current_status IN ('Retired', 'Temporarily Closed')
+              OR EXISTS (
+                  SELECT 1 FROM [BOOKING] b
+                  WHERE b.space_code = i.space_code AND b.booking_id <> i.booking_id
+                    AND b.booking_status = 'Approved'
+                    AND i.requested_start < b.requested_end AND i.requested_end > b.requested_start
+              )
+              OR EXISTS (
+                  SELECT 1 FROM [MAINTENANCERECORD] m
+                  WHERE m.space_code = i.space_code
+                    AND m.maintenance_status IN ('Reported', 'In Progress')
+                    AND (i.requested_start < m.completion_time OR m.completion_time IS NULL)
+                    AND i.requested_end > m.start_time
+              )
+          )
+    )
+    BEGIN
+        RAISERROR ('Double booking, scheduling during maintenance, or booking retired/closed spaces is forbidden.', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+END;
+GO
+
+-- ============================================================
+-- Trigger: Enforce Booking Cancellation and Audit Rules (BR-21)
+-- ============================================================
+CREATE TRIGGER TR_BOOKING_STATUS_AND_AUDIT
+ON [BOOKING]
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Enforce Cancellation Rule: Can only cancel if status was 'Pending' or 'Approved'
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN deleted d ON i.booking_id = d.booking_id
+        WHERE i.booking_status = 'Cancelled'
+          AND d.booking_status NOT IN ('Pending', 'Approved')
+    )
+    BEGIN
+        RAISERROR ('A booking may be cancelled only if the booking status is Pending or Approved.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    -- Enforce Cancellation Audit Rule: Cancelled bookings cannot be deleted
+    IF EXISTS (
+        SELECT 1
+        FROM deleted
+        WHERE booking_status = 'Cancelled'
+          AND NOT EXISTS (SELECT 1 FROM inserted)
+    )
+    BEGIN
+        RAISERROR ('Cancelled bookings must remain stored in the system to preserve historical records and auditability.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+END;
 GO

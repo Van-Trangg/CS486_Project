@@ -10,7 +10,7 @@ This logical database design translates the conceptual model (ERD) into a set of
 * **Many-to-Many (M:N) Relationship Resolution**: The M:N relationship `Space_Equipped_With_Facility` between `SPACE` and `FACILITY` is resolved by introducing an associative (junction) table named `SPACE_FACILITY`. To ensure entity integrity and prevent duplicate assignments, it uses a composite primary key consisting of `(space_code, facility_id)`.
 * **One-to-One (1:1) Relationship Mapping**: The 1:1 relationship `Booking_Has_UsageSession` between `BOOKING` and `USAGESESSION` is mapped by designating `booking_id` as the primary key of the `USAGESESSION` table. This `booking_id` also acts as a foreign key referencing `BOOKING(booking_id)`. This enforces that a booking has at most one usage session, and a usage session cannot exist without a booking.
 * **Referential Integrity Actions (ON DELETE/ON UPDATE)**:
-  - For the 1:1 relationship between `USAGESESSION` and `BOOKING`, `ON DELETE CASCADE` and `ON UPDATE CASCADE` are specified. If a booking request is deleted, its actual usage logs are deleted in tandem.
+  - For the 1:1 relationship between `USAGESESSION` and `BOOKING`, `ON DELETE NO ACTION` and `ON UPDATE NO ACTION` are specified. If a booking request is deleted, its actual usage logs are protected and cannot be deleted.
   - For the junction table `SPACE_FACILITY`, `ON DELETE CASCADE` is set for foreign keys referencing both `SPACE` and `FACILITY`. This prevents orphaned rows in the junction table.
   - For all other tables referencing `USER` or `SPACE` (such as `BOOKING`, `USAGESESSION`, and `MAINTENANCERECORD`), `ON DELETE NO ACTION` and `ON UPDATE NO ACTION` are defined. This prevents deletion of users or spaces that have associated historical booking or maintenance logs, thereby protecting data auditability.
 * **No Redundant Visual Diagrams**: In alignment with the project instructions, graphical schema diagrams are omitted from this document as the structural relationships have been fully conceptualized and validated in the preceding Step 2 ERD.
@@ -75,16 +75,16 @@ Represents a space reservation request submitted by a user.
 | `booking_id` | `INT` | NOT NULL | PK | PRIMARY KEY | Unique auto-incrementing identifier. |
 | `space_code` | `VARCHAR(50)` | NOT NULL | FK | FK references `SPACE(space_code)` | The space being requested. |
 | `requester_id` | `VARCHAR(50)` | NOT NULL | FK | FK references `USER(user_id)` | The user submitting the request. |
-| `requested_start` | `DATETIME` | NOT NULL | - | - | Requested start timestamp. |
+| `requested_start` | `DATETIME` | NOT NULL | - | CHECK | Requested start timestamp (must be >= created_at). |
 | `requested_end` | `DATETIME` | NOT NULL | - | CHECK | Requested end timestamp (must be > start). |
 | `purpose` | `VARCHAR(100)` | NOT NULL | - | CHECK | Purpose of use constraint (Lecture, Meeting, Exam, etc.). |
-| `expected_participants`| `INT` | NOT NULL | - | CHECK | Projected attendee count (must be > 0). |
+| `expected_participants`| `INT` | NOT NULL | - | CHECK | Projected attendee count (must be > 0 and <= space capacity). |
 | `booking_status` | `VARCHAR(30)` | NOT NULL | - | CHECK | Request processing status (Pending, Approved, Rejected, etc.). |
 | `created_at` | `DATETIME` | NOT NULL | - | DEFAULT | Time request was created. Defaults to `GETDATE()`. |
 | `approver_id` | `VARCHAR(50)` | NULL | FK | FK references `USER(user_id)` | Staff or manager who decided. Nullable. |
 | `decision_time` | `DATETIME` | NULL | - | - | Time decision was recorded. Nullable. |
 | `decision_note` | `NVARCHAR(MAX)` | NULL | - | - | Staff review notes. Nullable. |
-| `rejection_reason` | `VARCHAR(255)` | NULL | - | - | Explanation of rejection. Nullable. |
+| `rejection_reason` | `VARCHAR(255)` | NULL | - | CHECK | Explanation of rejection (mandatory if status is Rejected). Nullable. |
 
 ### 2.6. Table: USAGESESSION
 Tracks actual check-in and checkout details for approved bookings.
@@ -171,6 +171,11 @@ ALTER TABLE BOOKING ADD CONSTRAINT CK_BOOKING_STATUS CHECK (
     booking_status IN ('Pending', 'Approved', 'Rejected', 'Cancelled', 'Checked In', 'Completed', 'No-Show')
 );
 
+-- Additional BOOKING Check Constraints
+ALTER TABLE BOOKING ADD CONSTRAINT CK_BOOKING_FUTURE_START CHECK (requested_start >= created_at);
+ALTER TABLE BOOKING ADD CONSTRAINT CK_BOOKING_REJECTION_REASON CHECK (booking_status <> 'Rejected' OR rejection_reason IS NOT NULL);
+ALTER TABLE BOOKING ADD CONSTRAINT CK_BOOKING_CAPACITY_LIMIT CHECK (dbo.fn_CheckSpaceCapacity(space_code, expected_participants) = 1);
+
 -- 6. USAGESESSION Table Constraints
 ALTER TABLE USAGESESSION ADD CONSTRAINT CK_USAGE_TIME_ORDER CHECK (actual_end > actual_start);
 
@@ -184,6 +189,103 @@ ALTER TABLE MAINTENANCERECORD ADD CONSTRAINT CK_MAINTENANCE_STATUS CHECK (
 ALTER TABLE MAINTENANCERECORD ADD CONSTRAINT CK_MAINTENANCE_PROBLEM_TYPE CHECK (
     problem_type IN ('Projector Failure', 'Air-Conditioning Issue', 'Cleaning Issue', 'Furniture Damage', 'Network Issue', 'Other')
 );
+```
+
+### 3.1. Procedural Constraints (Functions & Triggers)
+
+The following database-level procedural objects enforce complex business rules that cannot be verified by simple column constraints:
+
+```sql
+-- 1. Space Capacity Verification Function (BR-19)
+CREATE FUNCTION dbo.fn_CheckSpaceCapacity (@SpaceCode VARCHAR(50), @Participants INT)
+RETURNS BIT
+AS
+BEGIN
+    DECLARE @Capacity INT;
+    DECLARE @Result BIT = 1;
+    
+    SELECT @Capacity = capacity FROM SPACE WHERE space_code = @SpaceCode;
+    
+    IF @Participants > @Capacity
+        SET @Result = 0;
+        
+    RETURN @Result;
+END;
+GO
+
+-- 2. Overlapping Bookings & Maintenance Trigger (BR-11, BR-12)
+CREATE TRIGGER TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE
+ON BOOKING
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1 
+        FROM inserted i
+        JOIN SPACE s ON i.space_code = s.space_code
+        WHERE i.booking_status = 'Approved'
+          AND (
+              s.current_status IN ('Retired', 'Temporarily Closed')
+              OR EXISTS (
+                  SELECT 1 FROM BOOKING b
+                  WHERE b.space_code = i.space_code AND b.booking_id <> i.booking_id
+                    AND b.booking_status = 'Approved'
+                    AND i.requested_start < b.requested_end AND i.requested_end > b.requested_start
+              )
+              OR EXISTS (
+                  SELECT 1 FROM MAINTENANCERECORD m
+                  WHERE m.space_code = i.space_code
+                    AND m.maintenance_status IN ('Reported', 'In Progress')
+                    AND (i.requested_start < m.completion_time OR m.completion_time IS NULL)
+                    AND i.requested_end > m.start_time
+              )
+          )
+    )
+    BEGIN
+        RAISERROR ('Double booking, scheduling during maintenance, or booking retired/closed spaces is forbidden.', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+END;
+GO
+
+-- 3. Booking Cancellation State Transition & Audit Trigger (BR-21)
+CREATE TRIGGER TR_BOOKING_STATUS_AND_AUDIT
+ON BOOKING
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Enforce Cancellation Rule: Can only cancel if status was 'Pending' or 'Approved'
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN deleted d ON i.booking_id = d.booking_id
+        WHERE i.booking_status = 'Cancelled'
+          AND d.booking_status NOT IN ('Pending', 'Approved')
+    )
+    BEGIN
+        RAISERROR ('A booking may be cancelled only if the booking status is Pending or Approved.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    -- Enforce Cancellation Audit Rule: Cancelled bookings cannot be deleted
+    IF EXISTS (
+        SELECT 1
+        FROM deleted
+        WHERE booking_status = 'Cancelled'
+          AND NOT EXISTS (SELECT 1 FROM inserted)
+    )
+    BEGIN
+        RAISERROR ('Cancelled bookings must remain stored in the system to preserve historical records and auditability.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+END;
+GO
 ```
 
 ## 4. Traceability Matrix
@@ -219,16 +321,16 @@ This matrix traces each mapped table, column, and constraint back to its source 
 | `BOOKING` | `booking_id` | `BOOKING.booking_id` | §4.4, §3.4 | Primary Key. Auto-increment. |
 | `BOOKING` | `space_code` | `BOOKING.space_code` | §4.4, §3.4 | FK references SPACE. |
 | `BOOKING` | `requester_id` | `BOOKING.requester_id` | §4.4, §3.4 | FK references USER. |
-| `BOOKING` | `requested_start`| `BOOKING.requested_start` | §4.4, §3.4 | Requested start time. |
+| `BOOKING` | `requested_start`| `BOOKING.requested_start` | §4.4, §3.4 | CHECK constraint enforces future start (BR-20). |
 | `BOOKING` | `requested_end` | `BOOKING.requested_end` | §4.4, §3.4 | Requested end time. CHECK order constraint. |
 | `BOOKING` | `purpose` | `BOOKING.purpose` | §4.4, §3.4 | CHECK constraint checks purpose enums. |
-| `BOOKING` | `expected_participants`| `BOOKING.expected_participants`| §4.4, §3.4 | CHECK constraint enforces count > 0. |
-| `BOOKING` | `booking_status`| `BOOKING.booking_status` | §4.4, §3.4 | CHECK constraint checks status enums. |
+| `BOOKING` | `expected_participants`| `BOOKING.expected_participants`| §4.4, §3.4 | CHECK enforces count > 0 and <= capacity via UDF. |
+| `BOOKING` | `booking_status`| `BOOKING.booking_status` | §4.4, §3.4 | CHECK constraint checks status enums. Trigger prevents overlap if 'Approved'. Trigger TR_BOOKING_STATUS_AND_AUDIT enforces cancellation and audit rules (BR-21). |
 | `BOOKING` | `created_at` | `BOOKING.created_at` | §4.4, §3.4 | DEFAULT constraint `GETDATE()`. |
 | `BOOKING` | `approver_id` | `BOOKING.approver_id` | §4.4, §3.4 | FK references USER. Nullable. |
 | `BOOKING` | `decision_time` | `BOOKING.decision_time` | §4.4, §3.4 | Nullable decision time. |
 | `BOOKING` | `decision_note` | `BOOKING.decision_note` | §4.4, §3.4 | Nullable staff comments. |
-| `BOOKING` | `rejection_reason`| `BOOKING.rejection_reason` | §4.4, §3.4 | Nullable rejection explanation. |
+| `BOOKING` | `rejection_reason`| `BOOKING.rejection_reason` | §4.4, §3.4 | CHECK constraint forces non-null if rejected. |
 | `USAGESESSION` | `booking_id` | `USAGESESSION.booking_id` | §4.5, §3.5 | PK, FK references BOOKING. 1:1 relationship. |
 | `USAGESESSION` | `check_in_staff_id`| `USAGESESSION.check_in_staff_id`| §4.5, §3.5 | FK references USER (staff). |
 | `USAGESESSION` | `actual_start` | `USAGESESSION.actual_start` | §4.5, §3.5 | Physical start time. |

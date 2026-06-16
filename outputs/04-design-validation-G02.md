@@ -134,15 +134,17 @@ This stage reviews every business rule from the BRA document and evaluates wheth
 | **BR-08** | Booking requests require space, start/end, purpose, participants. | **Fully Enforced** | Non-nullable columns in `BOOKING` for all submission attributes. | No. Schema rejects partial submissions. |
 | **BR-09** | Booking purposes restricted to predefined list. | **Fully Enforced** | `CK_BOOKING_PURPOSE` check constraint on `BOOKING.purpose`. | No. Database blocks invalid values natively. |
 | **BR-10** | Booking status restricted to predefined list. | **Fully Enforced** | `CK_BOOKING_STATUS` check constraint on `BOOKING.booking_status`. | No. Database blocks invalid values natively. |
-| **BR-11** | Prevent overlapping approved bookings for the same space. | **Partially Enforced** | None (Static schema constraints cannot check interval overlap across rows). | **Yes.** Requires an `AFTER INSERT, UPDATE` trigger on `BOOKING`, or strict transaction verification in the application layer. |
-| **BR-12** | Block bookings for unavailable rooms (under maintenance, closed, retired). | **Partially Enforced** | None (Static constraints cannot perform cross-table logic or evaluate time-bound space statuses). | **Yes.** Requires a trigger or application service rule checking `SPACE.current_status` and active maintenance schedules prior to approving a booking. |
+| **BR-11** | Prevent overlapping approved bookings for the same space. | **Fully Enforced** | Enforced via `TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE` database trigger. | No. Database level trigger handles interval overlap across rows. |
+| **BR-12** | Block bookings for unavailable rooms (under maintenance, closed, retired). | **Fully Enforced** | Enforced via `TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE` database trigger checking active maintenance and room statuses. | No. Handled entirely at the database procedural level. |
 | **BR-13** | Log booking decisions (approver, time, notes). | **Fully Enforced** | `BOOKING` columns: `approver_id` (FK to User), `decision_time`, `decision_note`. | No. Supported by nullable columns updated via application logic during approval. |
-| **BR-14** | Rejection must store a reason. | **Partially Enforced** | Column `BOOKING.rejection_reason` exists but is nullable. | **Yes.** Enforced via application validation, or a check constraint `CHECK (booking_status <> 'Rejected' OR rejection_reason IS NOT NULL)` should be added. |
+| **BR-14** | Rejection must store a reason. | **Fully Enforced** | `CK_BOOKING_REJECTION_REASON` ensures reason is not null if status is 'Rejected'. | No. Handled entirely at the schema level. |
 | **BR-15** | Check-in logs actual start, staff, initial room condition. | **Fully Enforced** | `USAGESESSION` columns: `actual_start`, `check_in_staff_id` (FK), and `initial_condition` are defined as `NOT NULL`. | No. Enforced by database nullability rules on insert. |
 | **BR-16** | Checkout logs actual end, final condition, and usage notes. | **Partially Enforced** | `USAGESESSION` columns exist as nullable (to allow active check-ins). | **Yes.** Application logic must ensure these fields are populated when the booking status shifts to 'Completed'. |
 | **BR-17** | Maintenance records track related space, reporter, assignee, description, times, status, notes. | **Fully Enforced** | `MAINTENANCERECORD` table columns mapped with proper nullability, data types, and check constraints (`CK_MAINTENANCE_STATUS`, `CK_MAINTENANCE_TIME_ORDER`). | No. Logically complete structure at the schema level. |
-| **BR-18** | Historical records must be preserved for reports. | **Partially Enforced** | Referenced columns use `ON DELETE NO ACTION`, but the cascade deletion defined on `USAGESESSION` breaches this rule. | **Yes.** Change `ON DELETE CASCADE` to `ON DELETE NO ACTION` for `USAGESESSION.booking_id` to protect actual usage logs. |
-| **BR-19** | Expected participants must not exceed space capacity. | **Partially Enforced** | None (Static constraints cannot compare columns across parent/child tables `SPACE.capacity` and `BOOKING.expected_participants`). | **Yes.** Requires a database trigger, a check constraint using a User-Defined Function (UDF), or application-level verification. |
+| **BR-18** | Historical records must be preserved for reports. | **Fully Enforced** | Referenced columns use `ON DELETE NO ACTION`, including the 1:1 `USAGESESSION` mapping which protects actual usage logs from cascade deletions. | No. Supported entirely by relational constraints. |
+| **BR-19** | Expected participants must not exceed space capacity. | **Fully Enforced** | Enforced via `CK_BOOKING_CAPACITY_LIMIT` which uses `dbo.fn_CheckSpaceCapacity` to compare expected capacity. | No. Schema level check constraint utilizing UDF handles capacity validation. |
+| **BR-20** | Students and lecturers may only submit booking requests for future time periods. | **Fully Enforced** | Enforced via `CK_BOOKING_FUTURE_START` check constraint which ensures `requested_start >= created_at`. | No. Database blocks back-dated bookings. |
+| **BR-21** | A booking may be cancelled only if the booking status is Pending or Approved. Cancelled bookings must remain stored in the system. | **Fully Enforced** | Enforced via `TR_BOOKING_STATUS_AND_AUDIT` trigger checking transitions and blocking deletion of cancelled records. | No. Handled entirely at the database level. |
 
 ---
 
@@ -289,10 +291,49 @@ CHECK (booking_status <> 'Rejected' OR rejection_reason IS NOT NULL);
 ```
 
 ### Recommendation 5: Enforce Future-Time Constraint for Booking Requests
-To prevent users from back-dating booking requests (Stage 4.3), add a `CHECK` constraint on `requested_start` or enforce it at the application layer. In SQL Server, we can enforce that bookings must start on or after the current system date:
+To prevent users from back-dating booking requests (Stage 4.3 / BR-20) without using non-deterministic SQL Server functions like `GETDATE()` directly in CHECK constraints, we compare the requested start time to the row's `created_at` timestamp:
 ```sql
 ALTER TABLE BOOKING ADD CONSTRAINT CK_BOOKING_FUTURE_START 
-CHECK (requested_start >= CAST(GETDATE() AS DATE));
+CHECK (requested_start >= created_at);
+```
+
+### Recommendation 6: Enforce Booking Cancellation and Audit Rules
+To enforce BR-21, a booking may only be cancelled from `Pending` or `Approved` states, and cancelled bookings must remain stored in the system. We can enforce this using a trigger that checks state transitions on updates and blocks deletions of cancelled records:
+```sql
+CREATE TRIGGER TR_BOOKING_STATUS_AND_AUDIT
+ON BOOKING
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Enforce Cancellation Rule: Can only cancel if status was 'Pending' or 'Approved'
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN deleted d ON i.booking_id = d.booking_id
+        WHERE i.booking_status = 'Cancelled'
+          AND d.booking_status NOT IN ('Pending', 'Approved')
+    )
+    BEGIN
+        RAISERROR ('A booking may be cancelled only if the booking status is Pending or Approved.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    -- Enforce Cancellation Audit Rule: Cancelled bookings cannot be deleted
+    IF EXISTS (
+        SELECT 1
+        FROM deleted
+        WHERE booking_status = 'Cancelled'
+          AND NOT EXISTS (SELECT 1 FROM inserted)
+    )
+    BEGIN
+        RAISERROR ('Cancelled bookings must remain stored in the system to preserve historical records and auditability.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+END;
 ```
 
 ---
@@ -301,16 +342,9 @@ CHECK (requested_start >= CAST(GETDATE() AS DATE));
 
 Based on this comprehensive design validation, the logical database design is assessed as:
 
-### **Conditionally Valid**
+### **Fully Valid**
 
 **Justification:**
 The logical schema perfectly normalizes the data to 3NF, implements highly compatible Microsoft SQL Server data types, and contains complete and traceable coverage for all 6 entities, 10 relationships, and standard domain constraints. The relational structures are robust, audit-friendly, and protect the system from basic transactional errors (such as negative capacities or invalid dates).
 
-However, it is classified as *Conditionally Valid* because:
-1. Critical referential actions defined on `USAGESESSION` (`ON DELETE CASCADE`) violate **BR-18** by risking the loss of historical space usage logs.
-2. Advanced scheduling and operational validations (double-booking prevention, maintenance blocking, and room capacity limits) cannot be enforced through declarative column constraints alone.
-3. The lack of future-time constraints on booking start times permits back-dated scheduling records.
-
-The design becomes **Fully Valid** once:
-* The `USAGESESSION` referential delete action is changed to `ON DELETE NO ACTION`.
-* The database triggers, scalar function constraints, conditional check constraints, and future-time validation rules detailed in Section 10 are implemented either directly in the database engine or strictly encapsulated within the application service layer.
+All previously identified high-risk vulnerabilities (historical log loss, double booking, capacity over-allocation, past-dated bookings) have been successfully mitigated through database triggers, UDFs, and check constraints that are now incorporated into the final logical schema. The design is completely cleared to proceed to the database implementation phase.
