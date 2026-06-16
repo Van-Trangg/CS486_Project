@@ -58,7 +58,7 @@ Record:
 
 Compare foreign key rules across related tables:
 
-- If a child table has `ON DELETE CASCADE` but the parent table’s business rule requires historical preservation (e.g., BR-18), flag as **High Risk**.
+- If a child table has `ON DELETE CASCADE` but the parent table’s business rule requires historical preservation, flag as **High Risk**.
 - If two related tables have conflicting referential actions (e.g., `BOOKING` has `ON DELETE NO ACTION`, but `USAGESESSION` has `ON DELETE CASCADE` on `booking_id`), flag as **High Risk** and recommend alignment.
 - Document any inconsistency with exact excerpts from the logical design.
 
@@ -126,16 +126,17 @@ Determine whether each constraint correctly supports the intended requirement.
 If a table stores transactional history (e.g., `BOOKING`, `USAGESESSION`, `MAINTENANCERECORD`):
 
 - Check whether any foreign key referencing it uses `ON DELETE CASCADE`.
-- If yes, and the business requirement explicitly states "historical records must be preserved" (BR-18), then mark this as a **High Risk**.
+- If yes, and the business requirement explicitly states "historical records must be preserved", then mark this as a **High Risk**.
 - Recommend removing `ON DELETE CASCADE` or using soft deletion (status flags) instead.
 
 ### Stage 4.3 — Future-Time Constraints (No Past-Dated Events)
 
 For any column that represents a scheduled or anticipated future timestamp (e.g., a start time of a booking, a deadline, an event time):
 
-- Check whether the logical design includes a constraint (CHECK, trigger, or application rule) that prevents the timestamp from being set to a value earlier than the current database time (`CURRENT_TIMESTAMP` or `GETDATE()`) for new records.
+- Check whether the logical design includes a mechanism (trigger, application rule, or, where DBMS-allowed, a CHECK constraint) that prevents the timestamp from being set to a value earlier than the current database time (`GETDATE()` or `CURRENT_TIMESTAMP`) for new records.
 - If no such constraint exists, and the column is used for future scheduling, mark this as a **Medium Risk**.
-- Recommendation: Add a `CHECK` constraint (e.g., `scheduled_start >= CAST(GETDATE() AS DATE)` for dates, or use a trigger for precise timestamps) or enforce it at the application layer.
+- **Recommendation**: Enforce this rule with an `AFTER INSERT, UPDATE` trigger that compares the future‑time column against `GETDATE()` and rolls back if the value is in the past, **or** enforce it entirely at the application layer.
+- **Important note**: In Microsoft SQL Server, non‑deterministic functions like `GETDATE()` cannot be used in `CHECK` constraints. Therefore, do not recommend a `CHECK` constraint for this rule unless the project explicitly targets a DBMS that supports it (e.g., PostgreSQL allows `CURRENT_TIMESTAMP` in `CHECK` constraints). The trigger approach is safe and portable.
 - Note: This is separate from ordering constraints (e.g., end > start), which are already validated elsewhere.
 
 ---
@@ -171,6 +172,8 @@ Examples include:
 * Capacity validation
 * Maintenance restrictions
 * Role-based approval restrictions
+
+All business rules need a justification with the final conclusion
 
 ---
 
