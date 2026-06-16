@@ -4,8 +4,6 @@ description: Generate a complete Microsoft SQL Server DDL implementation from th
 compatibility: opencode
 ---
 
----
-
 ## 1. Purpose
 
 This skill instructs the agent to generate a complete, executable SQL DDL script for Microsoft SQL Server.
@@ -195,6 +193,25 @@ No additional modifications are permitted.
 
 Write a single SQL file.
 
+#### 5.0 Database Creation and Context
+
+The script **must** create and use a dedicated database to avoid polluting the `master` database.
+Use the database name from the project context. If no name is given, default to `University`.
+
+Generate the following immediately after the header comment:
+
+```sql
+-- ============================================================
+-- Database creation and context
+-- ============================================================
+IF DB_ID('University') IS NULL
+    CREATE DATABASE University;
+GO
+
+USE University;
+GO
+```
+
 #### 5.1 Header Comment
 
 Example:
@@ -211,22 +228,30 @@ Example:
 
 #### 5.2 Cleanup Section
 
-Generate:
+Generate a drop section that removes **all** objects the script might create, in correct dependency order:
+
+1. Triggers (if defined in Step 3)
+2. Tables (child → parent)
+3. Functions (if defined in Step 3)
+
+Use `DROP … IF EXISTS` for everything. After the drop block, a single `GO`.
+
+Example:
 
 ```sql
-DROP TABLE IF EXISTS TableName;
-```
-
-Requirements:
-
-* Reverse dependency order.
-* Child tables before parent tables.
-
-After cleanup:
-
-```sql
+DROP TRIGGER IF EXISTS TR_BOOKING_STATUS_AND_AUDIT;
+DROP TRIGGER IF EXISTS TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE;
+DROP TABLE IF EXISTS MAINTENANCERECORD;
+DROP TABLE IF EXISTS USAGESESSION;
+DROP TABLE IF EXISTS BOOKING;
+DROP TABLE IF EXISTS SPACE_FACILITY;
+DROP TABLE IF EXISTS FACILITY;
+DROP TABLE IF EXISTS SPACE;
+DROP TABLE IF EXISTS [USER];
+DROP FUNCTION IF EXISTS dbo.fn_CheckSpaceCapacity;
 GO
 ```
+
 ### Stage 5.2.1 — Reserved Keyword Handling
 
 Before generating SQL identifiers, verify whether any table name, column name, constraint name, or other schema identifier matches a Microsoft SQL Server reserved keyword.
@@ -317,6 +342,23 @@ Requirements:
 * Parent tables before child tables.
 * Explicit constraint declarations.
 * Explicit constraint names.
+
+**CRITICAL: DEFAULT constraints MUST be defined inline on the column definition, NOT as a separate table-level `CONSTRAINT ... DEFAULT ... FOR column` clause.**  
+Use the form:
+
+```sql
+column_name data_type NOT NULL CONSTRAINT DF_Table_Column DEFAULT default_value,
+```
+
+Do **not** use:
+
+```sql
+column_name data_type NOT NULL,
+...
+CONSTRAINT DF_Table_Column DEFAULT default_value FOR column_name,
+```
+
+This ensures compatibility across all SQL Server environments.
 
 After each table:
 
@@ -426,6 +468,7 @@ Verify:
 * Uses DROP TABLE IF EXISTS.
 * Uses GO separators.
 * Script can be executed repeatedly without error.
+* **All DEFAULT constraints are inline on columns**, not table-level with `FOR column`.
 
 ---
 
@@ -587,5 +630,8 @@ Before signaling completion, verify:
 * [ ] The script is valid T-SQL.
 * [ ] The script can be executed repeatedly on SQL Server.
 * [ ] Output file name is exactly `outputs/05-db-definition-G02.sql`.
+* [ ] All DEFAULT constraints are defined inline on columns (not with `FOR column`).
+* [ ] The script creates and uses a dedicated database (not master).
+* [ ] The cleanup section drops all triggers and functions, not just tables.
 
 Save the file and signal completion.
