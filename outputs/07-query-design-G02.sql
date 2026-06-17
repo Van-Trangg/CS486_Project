@@ -11,21 +11,19 @@ GO
 -- ============================================================
 -- QUERY 1: Space Utilization Rate
 -- ============================================================
--- What we're trying to find out:
---   How much are our different space types actually being used?
---   We want the total hours each type of room has been occupied
---   based on real check-in/check-out data from usage sessions.
+-- Business Objective:
+--   Determine the actual utilization rate for each space type by calculating
+--   the total hours rooms were occupied. This metric is derived from check-in 
+--   and check-out timestamps in usage sessions.
 --
--- Who would use this:
---   Facility managers — so they can figure out which room types
---   are in high demand and which ones are sitting empty most of
---   the time.
+-- Target Audience:
+--   Facility managers who need to identify high-demand space types 
+--   versus underutilized ones.
 --
--- Why this matters:
---   If we see that computer labs are getting way more usage than
---   meeting rooms, the school can decide to convert underused
---   spaces or adjust schedules. It's the main metric
---   for deciding if our rooms are being used efficiently.
+-- Practical Value:
+--   Enables data-driven decision-making for space allocation, such as
+--   repurposing consistently empty meeting rooms or expanding high-demand
+--   computer laboratory resources.
 --
 -- SQL:
 SELECT 
@@ -60,20 +58,16 @@ Student Workspace                   1                    0                    0 
 -- ============================================================
 -- QUERY 2: Peak Booking Time Slots
 -- ============================================================
--- What we're trying to find out:
---   Which days and hours get the most booking traffic? We're
---   looking at approved, checked-in, and completed bookings to
---   see when demand is highest.
+-- Business Objective:
+--   Identify peak booking days and hours by analyzing active, check-in, 
+--   and completed bookings to determine high-demand time slots.
 --
--- Who would use this:
---   Facility managers and staff — they need to know when to
---   schedule extra help at the front desk and when it's safe
---   to do maintenance without disrupting anyone.
+-- Target Audience:
+--   Facility operations managers and support staff.
 --
--- Why this matters:
---   If most bookings happen on Wednesdays between 9-11 AM,
---   that's when we need the most staff on duty. We can also
---   schedule cleaning and repairs during the quieter slots.
+-- Practical Value:
+--   Optimizes staff scheduling for high-traffic periods and helps identify 
+--   low-demand windows suitable for routine maintenance without disrupting users.
 --
 -- SQL:
 SELECT 
@@ -105,21 +99,17 @@ day_of_week_num day_of_week_name   start_hour  total_bookings total_expected_par
 -- ============================================================
 -- QUERY 3: No-Show and Cancellation Audit
 -- ============================================================
--- What we're trying to find out:
---   Which users are wasting room slots by not showing up or
---   cancelling their bookings? We calculate a "waste ratio"
---   for each person.
+-- Business Objective:
+--   Audit booking accountability by identifying users with high cancellation
+--   or no-show rates. Calculates a "waste percentage" for each user.
 --
--- Who would use this:
---   Facility managers and department admins — they can use
---   this to spot repeat offenders and decide whether to send
---   warnings or even suspend booking privileges.
+-- Target Audience:
+--   Facility administrators and department leads.
 --
--- Why this matters:
---   Every no-show or late cancellation means a room sat empty
---   when someone else could have used it. Tracking this lets
---   the school enforce accountability and keep things fair
---   for everyone.
+-- Practical Value:
+--   Enables the enforcement of fair-use policies and accountability. Administrators 
+--   can identify repeat offenders to issue warnings or temporarily suspend booking privileges, 
+--   minimizing wasted room capacity.
 --
 -- SQL:
 SELECT 
@@ -158,23 +148,16 @@ TA2023002    Miguel Rios          Teaching Assistant     Computer Science       
 -- ============================================================
 -- QUERY 4: Maintenance Impact and Downtime Analysis
 -- ============================================================
--- What we're trying to find out:
---   For each room, how many maintenance events have happened,
---   how many are still open, and how many total hours the room
---   has been down? We also pull the most frequent problem type
---   for each space.
+-- Business Objective:
+--   Analyze maintenance frequency, active issues, total downtime (in hours), 
+--   and the most common failure type for each physical space.
 --
--- Who would use this:
---   Facility managers — if a room keeps breaking down because
---   of the same issue (like the AC keeps dying), they can
---   justify budget for a proper fix instead of patching it
---   every time.
+-- Target Audience:
+--   Maintenance operations and facility managers.
 --
--- Why this matters:
---   Chronic maintenance issues hurt everyone. Students lose
---   access to rooms, staff waste time on repeat repairs, and
---   the school loses money. This query gives hard numbers to
---   back up repair/replacement decisions.
+-- Practical Value:
+--   Identifies chronic issues (e.g., recurring HVAC or projector failures) to support 
+--   long-term budgeting for equipment replacements rather than repeated temporary repairs.
 --
 -- SQL:
 WITH MaintenanceStats AS (
@@ -227,21 +210,18 @@ CS-B2-F2-R205   Student Hub 205      Student Workspace                          
 -- ============================================================
 -- QUERY 5: Dynamic Space Search with Facility Filter
 -- ============================================================
--- What we're trying to find out:
---   Which available rooms have at least 15 seats, come with a
---   working projector, and are free during a specific time slot?
---   This is basically the search logic behind a booking form.
+-- Business Objective:
+--   Query available spaces dynamically based on a target capacity (>= 15 seats), 
+--   presence of functional equipment (e.g., projector), and availability within 
+--   a specific time window.
 --
--- Who would use this:
---   Students, lecturers, TAs, department admins — anyone who
---   needs to find and book a room that fits their requirements.
+-- Target Audience:
+--   End-users (students, faculty, department admins) looking to book a space, 
+--   powering the backend search function of the application.
 --
--- Why this matters:
---   This is the most practical query in the whole system. Instead
---   of manually checking each room's capacity, equipment list,
---   and booking calendar, this query does it all in one shot.
---   It filters out rooms that are under maintenance, already
---   booked, or don't have the right equipment.
+-- Practical Value:
+--   Automates availability checks by simultaneously filtering out spaces that are 
+--   already booked, undergo active maintenance, or do not meet equipment/capacity requirements.
 --
 -- SQL:
 SELECT 
