@@ -255,7 +255,7 @@ The following explicit business rules are derived directly from the requirement 
 18. **Historical and Operational Reports:** The system must preserve logs and support viewing booking history, upcoming events, active maintenance, and no-show counts.
     - *Requirement Text:* "The system should keep historical records of bookings and maintenance activities. Staff should be able to view booking history, upcoming bookings, spaces under maintenance, and no-show bookings." (line 18)
 19. **Capacity Limit Rule:** Expected participant count must not exceed the capacity of the selected space.
-20. **Future Booking Requirement:** Students and lecturers may only submit booking requests for future time periods. Booking requests with a requested start time earlier than the current system time are not permitted.
+20. **Future Booking Requirement:** **Future Booking Requirement:** Users whose role is not Facility Staff or Facility Manager may only submit booking requests for future time periods. Booking requests with a requested start time earlier than the current system time are not permitted.
 21. **Booking Cancellation Rule:** A booking may be cancelled only if the booking status is `Pending`, or `Approved`. Cancelled bookings shall remain stored in the system to preserve historical records and auditability.
 ---
 
