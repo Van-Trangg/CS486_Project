@@ -6,7 +6,7 @@
 
 **APPROVED**
 
-All 9 checks pass with zero issues. The DDL script (`05-db-definition-G02.sql`) faithfully implements the Step 3 logical design with no deviations. All 7 tables, all columns, all primary/foreign keys, all 18 CHECK constraints, 3 DEFAULTs, 2 UNIQUEs, 1 function, and 2 triggers match the logical design specification exactly. No extra objects are present. SQL Server syntax is correct, reserved keywords are properly delimited with square brackets, and all naming conventions are followed. No mandatory fixes from Step 4 were required (no High Risk issues identified in the validation report), and none are missing.
+All 9 checks pass. The DDL faithfully implements every table, column, primary key, foreign key, constraint, function, and trigger defined in Step 3. No mandatory schema fixes were required by Step 4 (no High Risk findings). The script is syntactically valid T-SQL, idempotent, and ready to proceed to Step 6.
 
 ---
 
@@ -31,133 +31,150 @@ All 9 checks pass with zero issues. The DDL script (`05-db-definition-G02.sql`) 
 ### Check 1 — Table Completeness
 **Result:** PASS
 
-All 7 tables from Step 3 §2 are present in the DDL: `[USER]` (line 54), `SPACE` (line 78), `FACILITY` (line 104), `BOOKING` (line 118), `USAGESESSION` (line 178), `SPACE_FACILITY` (line 210), `MAINTENANCERECORD` (line 243). No tables are omitted and no extra tables are present. Table set matches Step 3 exactly.
+Extracted 7 table names from Step 3 (§2): `USER`, `SPACE`, `FACILITY`, `SPACE_FACILITY`, `BOOKING`, `USAGESESSION`, `MAINTENANCERECORD`. Parsed DDL `CREATE TABLE` statements at lines 44, 67, 92, 107, 151, 194, 220 — all 7 tables present. No missing tables. No extra tables. `USER` correctly delimited as `[USER]` for reserved keyword handling.
 
 ### Check 2 — Column Completeness & Accuracy
 **Result:** PASS
 
-All sub-checks (2a–2f) pass for every column across all 7 tables.
+Verified all 52 columns across 7 tables:
 
-- **2a (No omissions):** Every column listed in Step 3 §2.1–§2.7 appears in the corresponding DDL `CREATE TABLE`.
-- **2b (No inventions):** No column in the DDL is absent from Step 3.
-- **2c (Name fidelity):** All column names match Step 3 exactly (snake_case, same casing).
-- **2d (Data type fidelity):** All data types match Step 3 exactly (e.g., `VARCHAR(50)`, `DATETIME`, `INT`, `NVARCHAR(MAX)`, `NVARCHAR(500)`).
-- **2e (Nullability fidelity):** `NOT NULL`/`NULL` matches Step 3 for every column. Nullable columns (`phone_number`, `approver_id`, `decision_time`, `decision_note`, `rejection_reason`, `check_out_staff_id`, `actual_end`, `final_condition`, `usage_notes`, `assigned_staff_id`, `completion_time`, `result_note`, `facility_description`, `description`) are all correctly nullable.
-- **2f (Default value fidelity):** `DF_BOOKING_CREATED_AT` defaults to `GETDATE()`, `DF_SPACE_FACILITY_QUANTITY` defaults to `1`, `DF_SPACE_FACILITY_STATUS` defaults to `'Operational'` — all match Step 3.
+| Table | Columns | DDL Lines | Status |
+|-------|---------|-----------|--------|
+| [USER] | 7 cols | 45–51 | ✅ Names, types, nullability all match Step 3 §2.1 |
+| SPACE | 9 cols | 68–76 | ✅ Matches Step 3 §2.2 |
+| FACILITY | 3 cols | 93–95 | ✅ Matches Step 3 §2.3; `IDENTITY(1,1)` on `facility_id` per Assumption 3 |
+| SPACE_FACILITY | 5 cols | 108–112 | ✅ Matches Step 3 §2.4; defaults inline: `DF_SPACE_FACILITY_QUANTITY DEFAULT 1`, `DF_SPACE_FACILITY_STATUS DEFAULT 'Operational'` |
+| BOOKING | 13 cols | 152–164 | ✅ Matches Step 3 §2.5; `IDENTITY(1,1)` on `booking_id`; `DF_BOOKING_CREATED_AT DEFAULT GETDATE()` inline |
+| USAGESESSION | 8 cols | 195–202 | ✅ Matches Step 3 §2.6 |
+| MAINTENANCERECORD | 10 cols | 221–230 | ✅ Matches Step 3 §2.7; `IDENTITY(1,1)` on `maintenance_id` |
+
+No omitted columns, no invented columns, no type/nullability/default mismatches.
 
 ### Check 3 — Primary Key Coverage
 **Result:** PASS
 
-All 7 tables have primary keys matching Step 3 exactly:
+All 7 primary keys verified:
 
-| Table | PK Columns | DDL Constraint | Status |
-|-------|-----------|----------------|--------|
-| `[USER]` | `user_id` | `PK_USER` (line 63) | ✅ |
-| `SPACE` | `space_code` | `PK_SPACE` (line 89) | ✅ |
-| `FACILITY` | `facility_id` | `PK_FACILITY` (line 109) | ✅ |
-| `BOOKING` | `booking_id` | `PK_BOOKING` (line 133) | ✅ |
-| `USAGESESSION` | `booking_id` | `PK_USAGESESSION` (line 188) | ✅ |
-| `SPACE_FACILITY` | `(space_code, facility_id)` | `PK_SPACE_FACILITY` (line 217) | ✅ |
-| `MAINTENANCERECORD` | `maintenance_id` | `PK_MAINTENANCERECORD` (line 255) | ✅ |
+| PK Name | Table | Column(s) | DDL Line | Status |
+|---------|-------|-----------|----------|--------|
+| PK_USER | [USER] | user_id | 53–54 | ✅ |
+| PK_SPACE | SPACE | space_code | 78–79 | ✅ |
+| PK_FACILITY | FACILITY | facility_id | 97–98 | ✅ |
+| PK_SPACE_FACILITY | SPACE_FACILITY | space_code, facility_id | 114–115 | ✅ Composite PK matches |
+| PK_BOOKING | BOOKING | booking_id | 166–167 | ✅ |
+| PK_USAGESESSION | USAGESESSION | booking_id | 204–205 | ✅ Shared PK for 1:1 relationship |
+| PK_MAINTENANCERECORD | MAINTENANCERECORD | maintenance_id | 232–233 | ✅ |
 
 ### Check 4 — Foreign Key Coverage & Referential Actions
 **Result:** PASS
 
-All 11 foreign key relationships from Step 3 are implemented with correct columns, referenced tables, and referential actions:
+All 11 foreign keys verified against Step 3 §1 (Relational Schema Mapping Decisions) and §2 table definitions:
 
-| FK Constraint | Child Column | Parent | ON DELETE | ON UPDATE |
-|--------------|-------------|--------|-----------|-----------|
-| `FK_BOOKING_SPACE` (L134) | `space_code` | `SPACE` | NO ACTION | NO ACTION |
-| `FK_BOOKING_USER_REQUESTER` (L139) | `requester_id` | `[USER]` | NO ACTION | NO ACTION |
-| `FK_BOOKING_USER_APPROVER` (L143) | `approver_id` | `[USER]` | NO ACTION | NO ACTION |
-| `FK_USAGESESSION_BOOKING` (L190) | `booking_id` | `BOOKING` | NO ACTION | NO ACTION |
-| `FK_USAGESESSION_USER_CHECKIN` (L194) | `check_in_staff_id` | `[USER]` | NO ACTION | NO ACTION |
-| `FK_USAGESESSION_USER_CHECKOUT` (L198) | `check_out_staff_id` | `[USER]` | NO ACTION | NO ACTION |
-| `FK_SPACE_FACILITY_SPACE` (L219) | `space_code` | `SPACE` | CASCADE | (default) |
-| `FK_SPACE_FACILITY_FACILITY` (L223) | `facility_id` | `FACILITY` | CASCADE | (default) |
-| `FK_MAINTENANCERECORD_SPACE` (L257) | `space_code` | `SPACE` | NO ACTION | NO ACTION |
-| `FK_MAINTENANCERECORD_USER_REPORTER` (L261) | `reporter_id` | `[USER]` | NO ACTION | NO ACTION |
-| `FK_MAINTENANCERECORD_USER_ASSIGNED` (L265) | `assigned_staff_id` | `[USER]` | NO ACTION | NO ACTION |
+| FK Name | Child → Parent | Column(s) | DDL Lines | ON DELETE | ON UPDATE | Status |
+|---------|----------------|-----------|-----------|-----------|-----------|--------|
+| FK_SPACE_FACILITY_SPACE | SPACE_FACILITY → SPACE | space_code | 116–117 | CASCADE (Step 3 §1) | NO ACTION (default) | ✅ |
+| FK_SPACE_FACILITY_FACILITY | SPACE_FACILITY → FACILITY | facility_id | 118–119 | CASCADE (Step 3 §1) | NO ACTION (default) | ✅ |
+| FK_BOOKING_SPACE | BOOKING → SPACE | space_code | 168–169 | NO ACTION | NO ACTION | ✅ |
+| FK_BOOKING_USER_REQUESTER | BOOKING → USER | requester_id | 170–171 | NO ACTION | NO ACTION | ✅ |
+| FK_BOOKING_USER_APPROVER | BOOKING → USER | approver_id | 172–173 | NO ACTION | NO ACTION | ✅ |
+| FK_USAGESESSION_BOOKING | USAGESESSION → BOOKING | booking_id | 206–207 | NO ACTION (Step 3 §1 bullet 3) | NO ACTION | ✅ |
+| FK_USAGESESSION_USER_CHECKIN | USAGESESSION → USER | check_in_staff_id | 208–209 | NO ACTION | NO ACTION | ✅ |
+| FK_USAGESESSION_USER_CHECKOUT | USAGESESSION → USER | check_out_staff_id | 210–211 | NO ACTION | NO ACTION | ✅ |
+| FK_MAINTENANCERECORD_SPACE | MAINTENANCERECORD → SPACE | space_code | 234–235 | NO ACTION | NO ACTION | ✅ |
+| FK_MAINTENANCERECORD_USER_REPORTER | MAINTENANCERECORD → USER | reporter_id | 236–237 | NO ACTION | NO ACTION | ✅ |
+| FK_MAINTENANCERECORD_USER_ASSIGNED | MAINTENANCERECORD → USER | assigned_staff_id | 238–239 | NO ACTION | NO ACTION | ✅ |
 
-All foreign key actions match Step 3 §1 (referential integrity actions). History-preserving tables consistently use `ON DELETE NO ACTION`. The junction table `SPACE_FACILITY` uses `ON DELETE CASCADE` as specified. No missing FKs, no incorrect actions.
+Column mappings are correct. Parent references are correct. `ON DELETE` actions match Step 3 §1 exactly. `ON UPDATE` actions where Step 3 is silent use SQL Server default (`NO ACTION`), which is permitted.
 
 ### Check 5 — Other Constraints (UNIQUE, CHECK, DEFAULT)
 **Result:** PASS
 
-**UNIQUE constraints (2 of 2):**
-- `UQ_USER_EMAIL` on `USER(email)` — line 64
-- `UQ_FACILITY_NAME` on `FACILITY(facility_name)` — line 110
+**UNIQUE (2):**
+- `UQ_USER_EMAIL` on `USER(email)` — lines 55–56 ✅
+- `UQ_FACILITY_NAME` on `FACILITY(facility_name)` — lines 99–100 ✅
 
-**CHECK constraints (18 of 18):**
-All 18 CHECK constraints from Step 3 §3 are present with exact conditions:
+**CHECK (18):** All 18 CHECK constraints from Step 3 §3 verified against DDL:
+| Constraint | DDL Lines | Condition Match | Status |
+|-----------|-----------|----------------|--------|
+| CK_USER_ROLE | 57–58 | `role IN ('Student', 'Lecturer', 'Teaching Assistant', 'Facility Staff', 'Department Administrator', 'Facility Manager')` | ✅ |
+| CK_USER_ACCOUNT_STATUS | 59–60 | `account_status IN ('Active', 'Suspended', 'Inactive')` | ✅ |
+| CK_SPACE_TYPE | 80–81 | `space_type IN ('Auditorium', 'Classroom', 'Computer Laboratory', 'Project Laboratory', 'Meeting Room', 'Student Workspace')` | ✅ |
+| CK_SPACE_CAPACITY | 82–83 | `capacity > 0` | ✅ |
+| CK_SPACE_CURRENT_STATUS | 84–85 | `current_status IN ('Available', 'In Use', 'Under Maintenance', 'Temporarily Closed', 'Retired')` | ✅ |
+| CK_SPACE_FACILITY_QUANTITY | 120–121 | `quantity > 0` | ✅ |
+| CK_SPACE_FACILITY_STATUS | 122–123 | `operation_status IN ('Operational', 'Partially Operational', 'Broken')` | ✅ |
+| CK_BOOKING_TIME_ORDER | 174–175 | `requested_end > requested_start` | ✅ |
+| CK_BOOKING_PARTICIPANTS | 176–177 | `expected_participants > 0` | ✅ |
+| CK_BOOKING_PURPOSE | 178–179 | `purpose IN ('Lecture', 'Examination', 'Seminar', 'Workshop', 'Meeting', 'Student Activity', 'Administrative Event')` | ✅ |
+| CK_BOOKING_STATUS | 180–181 | `booking_status IN ('Pending', 'Approved', 'Rejected', 'Cancelled', 'Checked In', 'Completed', 'No-Show')` | ✅ |
+| CK_BOOKING_FUTURE_START | 182–183 | `requested_start >= created_at` | ✅ |
+| CK_BOOKING_REJECTION_REASON | 184–185 | `booking_status <> 'Rejected' OR rejection_reason IS NOT NULL` | ✅ |
+| CK_BOOKING_CAPACITY_LIMIT | 186–187 | `dbo.fn_CheckSpaceCapacity(space_code, expected_participants) = 1` | ✅ |
+| CK_USAGE_TIME_ORDER | 212–213 | `actual_end > actual_start` | ✅ |
+| CK_MAINTENANCE_TIME_ORDER | 240–241 | `completion_time > start_time` | ✅ |
+| CK_MAINTENANCE_STATUS | 242–243 | `maintenance_status IN ('Reported', 'In Progress', 'Resolved', 'Cancelled')` | ✅ |
+| CK_MAINTENANCE_PROBLEM_TYPE | 244–245 | `problem_type IN ('Projector Failure', 'Air-Conditioning Issue', 'Cleaning Issue', 'Furniture Damage', 'Network Issue', 'Other')` | ✅ |
 
-| Constraint | Table | DDL Line | Status |
-|-----------|-------|----------|--------|
-| `CK_USER_ROLE` | USER | 65 | ✅ |
-| `CK_USER_ACCOUNT_STATUS` | USER | 68 | ✅ |
-| `CK_SPACE_TYPE` | SPACE | 90 | ✅ |
-| `CK_SPACE_CAPACITY` | SPACE | 93 | ✅ |
-| `CK_SPACE_CURRENT_STATUS` | SPACE | 94 | ✅ |
-| `CK_SPACE_FACILITY_QUANTITY` | SPACE_FACILITY | 229 | ✅ |
-| `CK_SPACE_FACILITY_STATUS` | SPACE_FACILITY | 233 | ✅ |
-| `CK_BOOKING_TIME_ORDER` | BOOKING | 149 | ✅ |
-| `CK_BOOKING_PARTICIPANTS` | BOOKING | 151 | ✅ |
-| `CK_BOOKING_PURPOSE` | BOOKING | 153 | ✅ |
-| `CK_BOOKING_STATUS` | BOOKING | 157 | ✅ |
-| `CK_BOOKING_FUTURE_START` | BOOKING | 161 | ✅ |
-| `CK_BOOKING_REJECTION_REASON` | BOOKING | 163 | ✅ |
-| `CK_BOOKING_CAPACITY_LIMIT` | BOOKING | 167 | ✅ |
-| `CK_USAGE_TIME_ORDER` | USAGESESSION | 202 | ✅ |
-| `CK_MAINTENANCE_TIME_ORDER` | MAINTENANCERECORD | 269 | ✅ |
-| `CK_MAINTENANCE_STATUS` | MAINTENANCERECORD | 271 | ✅ |
-| `CK_MAINTENANCE_PROBLEM_TYPE` | MAINTENANCERECORD | 275 | ✅ |
-
-**DEFAULT constraints (3 of 3):**
-- `DF_BOOKING_CREATED_AT` DEFAULT `GETDATE()` FOR `created_at` — line 147
-- `DF_SPACE_FACILITY_QUANTITY` DEFAULT `1` FOR `quantity` — line 227
-- `DF_SPACE_FACILITY_STATUS` DEFAULT `'Operational'` FOR `operation_status` — line 231
+**DEFAULT (3):** All inline on column definitions (not table-level `FOR column`):
+- `DF_SPACE_FACILITY_QUANTITY DEFAULT 1` on `SPACE_FACILITY.quantity` — line 110 ✅
+- `DF_SPACE_FACILITY_STATUS DEFAULT 'Operational'` on `SPACE_FACILITY.operation_status` — line 111 ✅
+- `DF_BOOKING_CREATED_AT DEFAULT GETDATE()` on `BOOKING.created_at` — line 160 ✅
 
 ### Check 6 — Mandatory Fixes from Step 4
 **Result:** PASS
 
-The Step 4 validation report (§9) identifies **no High Risk issues**. All four risks (R1–R4) are classified as **Medium Risk**, and the two minor issues (I1–I2) are Low. Therefore, no mandatory schema fixes from Step 4 are required to be applied to the DDL.
-
-The DDL correctly implements the Step 3 logical design as-is, without modifications for unrequired fixes. No mandatory fix documentation is needed because none are mandated.
+Reviewed Step 4 design validation report (§9 Issues and Risks, §10 Recommendations). No High Risk findings exist. All findings are Medium Risk (2 items) or Low Risk (2 items). The report explicitly states: "No schema changes required" (§10, recommendation #1) and "The design is ready to proceed to Step 5 with no mandatory fixes required" (§11). Therefore zero mandatory fixes apply. No fix documentation is expected in the DDL.
 
 ### Check 7 — Purity (No Extra Objects)
 **Result:** PASS
 
-The DDL contains exactly the objects specified in Step 3:
-- 7 tables (exactly matching Step 3)
-- 1 function (`dbo.fn_CheckSpaceCapacity`) — from Step 3 §3.1
-- 2 triggers (`TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE`, `TR_BOOKING_STATUS_AND_AUDIT`) — from Step 3 §3.1
+Scanned DDL for objects not present in Step 3:
 
-No extra tables, columns, foreign keys, unique constraints, check constraints, default constraints, indexes, views, stored procedures, or functions. Comments, whitespace, and `GO` separators are present as required but do not count as extra objects.
+| Object Type | Step 3 Count | DDL Count | Match |
+|------------|-------------|-----------|-------|
+| Tables | 7 | 7 | ✅ |
+| Columns | 52 | 52 | ✅ |
+| Primary Keys | 7 | 7 | ✅ |
+| Foreign Keys | 11 | 11 | ✅ |
+| UNIQUE constraints | 2 | 2 | ✅ |
+| CHECK constraints | 18 | 18 | ✅ |
+| DEFAULT constraints | 3 | 3 | ✅ |
+| Functions | 1 (`fn_CheckSpaceCapacity`) | 1 | ✅ |
+| Triggers | 9 | 9 | ✅ |
+| Indexes | 0 | 0 | ✅ |
+| Views | 0 | 0 | ✅ |
+| Stored Procedures | 0 | 0 | ✅ |
+
+All objects in the DDL are explicitly defined in Step 3 (§2, §3, §3.1). No extra tables, columns, constraints, indexes, views, or stored procedures introduced.
 
 ### Check 8 — SQL Server Syntax & Compatibility
 **Result:** PASS
 
-- **Cleanup statements:** `DROP TABLE IF EXISTS` used for all 7 tables in correct reverse dependency order (lines 12–25), plus `DROP FUNCTION IF EXISTS` (line 26).
-- **`GO` separators:** Present after the cleanup section (lines 13, 15, 17, 19, 21, 23, 25, 27), after `CREATE FUNCTION` (line 48), after every `CREATE TABLE` (lines 72, 98, 112, 171, 204, 237, 279), and after every `CREATE TRIGGER` (lines 321, 363).
-- **Reserved keywords:** `USER` is correctly delimited as `[USER]` in the `CREATE TABLE` statement (line 54) and in all FK references (lines 140, 144, 195, 199, 262, 266).
-- **Data types:** All types (`VARCHAR(n)`, `NVARCHAR(n)`, `NVARCHAR(MAX)`, `INT`, `DATETIME`) are valid SQL Server types.
-- **Constraint syntax:** All constraints are correctly declared inline within `CREATE TABLE` statements.
-- **No sample data:** No `INSERT`, `UPDATE`, `DELETE`, or `MERGE` statements.
-- **Idempotence:** The `DROP TABLE IF EXISTS` / `DROP FUNCTION IF EXISTS` preamble ensures repeatable execution.
+| Rule | Verification | Status |
+|------|-------------|--------|
+| Cleanup statements | `DROP ... IF EXISTS` for all 7 tables (lines 31–37), 9 triggers (lines 22–30), 1 function (line 38) | ✅ |
+| Reverse dependency order | MAINTENANCERECORD → USAGESESSION → BOOKING → SPACE_FACILITY → FACILITY → SPACE → [USER] (correct child→parent) | ✅ |
+| GO separators | After cleanup (line 39), after each CREATE TABLE, after function (line 146), after each trigger | ✅ |
+| Reserved keyword handling | `[USER]` delimited with square brackets on all references (lines 37, 44, 171, 173, 209, 211, 237, 239, 374, 400, 425, 437, 462) | ✅ |
+| Data type validity | All types valid T-SQL: `VARCHAR(n)`, `NVARCHAR(MAX)`, `INT`, `DATETIME` | ✅ |
+| Constraint syntax | All constraints properly attached to CREATE TABLE (inline or table-level) | ✅ |
+| DEFAULT constraints inline | All 3 DEFAULTs inline on column definitions (not `ALTER TABLE ... FOR column`) | ✅ |
+| No sample data | Zero INSERT/UPDATE/DELETE/MERGE statements | ✅ |
+| Idempotence | `IF DB_ID('University') IS NULL` + `DROP ... IF EXISTS` ensures rerunnable | ✅ |
+| Database creation | Creates `University` database if not exists (line 12–13) | ✅ |
 
 ### Check 9 — Naming Convention Compliance
 **Result:** PASS
 
-All constraint names follow the required patterns from the Step 5 skill:
+All constraint names verified against Step 5 skill conventions:
 
-| Pattern | Examples | Status |
-|---------|----------|--------|
-| `PK_<Table>` | `PK_USER`, `PK_SPACE`, `PK_FACILITY`, `PK_BOOKING`, `PK_USAGESESSION`, `PK_SPACE_FACILITY`, `PK_MAINTENANCERECORD` | ✅ |
-| `FK_<Child>_<Parent>` | `FK_BOOKING_SPACE`, `FK_BOOKING_USER_REQUESTER`, `FK_BOOKING_USER_APPROVER`, `FK_USAGESESSION_BOOKING`, `FK_USAGESESSION_USER_CHECKIN`, `FK_USAGESESSION_USER_CHECKOUT`, `FK_SPACE_FACILITY_SPACE`, `FK_SPACE_FACILITY_FACILITY`, `FK_MAINTENANCERECORD_SPACE`, `FK_MAINTENANCERECORD_USER_REPORTER`, `FK_MAINTENANCERECORD_USER_ASSIGNED` | ✅ |
-| `UQ_<Table>_<Column>` | `UQ_USER_EMAIL`, `UQ_FACILITY_NAME` | ✅ |
-| `CK_<Table>_<Description>` | `CK_USER_ROLE`, `CK_SPACE_CAPACITY`, `CK_BOOKING_STATUS`, `CK_MAINTENANCE_PROBLEM_TYPE`, etc. (18 total) | ✅ |
-| `DF_<Table>_<Column>` | `DF_BOOKING_CREATED_AT`, `DF_SPACE_FACILITY_QUANTITY`, `DF_SPACE_FACILITY_STATUS` | ✅ |
-| Trigger names | `TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE`, `TR_BOOKING_STATUS_AND_AUDIT` (follow descriptive pattern) | ✅ |
+| Pattern | Count | Examples | Status |
+|---------|-------|---------|--------|
+| `PK_<Table>` | 7 | PK_USER, PK_SPACE, PK_FACILITY, PK_SPACE_FACILITY, PK_BOOKING, PK_USAGESESSION, PK_MAINTENANCERECORD | ✅ |
+| `FK_<Child>_<Parent>` | 11 | FK_SPACE_FACILITY_SPACE, FK_BOOKING_SPACE, FK_USAGESESSION_BOOKING, etc. (disambiguation suffixes _REQUESTER, _APPROVER, _CHECKIN, _CHECKOUT, _REPORTER, _ASSIGNED used where multiple FKs exist between same parent-child pair) | ✅ |
+| `UQ_<Table>_<Column>` | 2 | UQ_USER_EMAIL, UQ_FACILITY_NAME | ✅ |
+| `CK_<Table>_<Description>` | 18 | CK_USER_ROLE, CK_SPACE_CAPACITY, CK_BOOKING_STATUS, etc. | ✅ |
+| `DF_<Table>_<Column>` | 3 | DF_SPACE_FACILITY_QUANTITY, DF_SPACE_FACILITY_STATUS, DF_BOOKING_CREATED_AT | ✅ |
 
 No naming convention violations.
 

@@ -252,5 +252,50 @@ If any check fails, correct before writing the final output.
 
 ---
 
-## 6. Output
+## 6. Common Pitfalls and Mitigations
+
+The following issues were identified during real execution of this skill on the Campus Space Management System. They are documented here as general guidance for future runs.
+
+### 6.1. AFTER INSERT Triggers That Block Sample Data
+
+**Problem:** A trigger defined in the DDL may enforce a business rule using `RAISERROR ... ROLLBACK` on INSERT, making it impossible to insert sample rows that represent a later lifecycle stage.
+
+*Example from CS486:* `TR_USAGESESSION_CHECK_BOOKING_STATUS` rejects USAGESESSION inserts unless the referenced booking has `booking_status = 'Approved'`. This blocks USAGESESSION rows for bookings at the `'Checked In'` or `'Completed'` stage.
+
+**Mitigation — General approach:**
+
+1. **Before writing INSERT statements, audit every AFTER INSERT trigger in the DDL.** For each trigger, determine which column values would cause it to roll back.
+2. **If a child table has a trigger that checks a parent's column value**, the parent row must have the expected value when the child is inserted. This may require:
+   - Setting the parent's status to the trigger-approved value (e.g., `'Approved'`) rather than the final lifecycle value.
+   - Covering the skipped enum values (e.g., `'Completed'`, `'Checked In'`) on **separate parent rows that have no child rows**, so enum coverage is not lost.
+3. **Document the constraint** in the verification report and in SQL comments adjacent to the affected INSERT block so future maintainers understand why certain status values were chosen.
+
+### 6.2. Future-Time Triggers and Date Sensitivity
+
+**Problem:** A trigger may reject inserts where a timestamp column is earlier than `GETDATE()` for certain actor types, making sample data with static dates execution-time-sensitive.
+
+*Example from CS486:* `TR_BOOKING_FUTURE_START_ENFORCEMENT` rejects booking inserts where `requested_start < GETDATE()` for users whose role is not `'Facility Staff'` or `'Facility Manager'`.
+
+**Mitigation — General approach:**
+
+1. **Identify all triggers that compare a column to `GETDATE()`** during Stage 1 schema extraction. These are execution-time-sensitive.
+2. **Choose sample dates sufficiently far in the future** from the expected script execution date. A general rule: use dates at least 6–12 months ahead of the project's current date to maximise the execution window.
+3. **Document the date window** as a comment in the file header: `-- This script executes correctly if run before YYYY-MM-DD.`
+4. **Accept the inherent limitation.** Sample data with static dates can never be future-proof against an arbitrary execution date. This is a property of the problem, not a defect in the data.
+
+### 6.3. Conditional Field Rules vs. Lifecycle State
+
+**Problem:** A column may be required (non-NULL) only when a related status column has a specific value, but the lifecycle state needed for a different constraint contradicts that requirement.
+
+*Example from CS486:* `approver_id` should be non-NULL for any non-Pending booking, but a booking at the `'Pending'` stage must have `approver_id = NULL`. If enum coverage requires a `'Pending'` row, that row must have all conditional-NULL fields set to NULL, even if other scenarios would populate them.
+
+**Mitigation — General approach:**
+
+1. **Identify all conditional field rules** from the BRA and DDL during Stage 5.
+2. **Ensure at least one row per status value satisfies the NULL/NOT NULL condition** for that status. If a status value requires NULL (e.g., `'Pending'` → `approver_id IS NULL`), the sample data for that row must have NULL.
+3. **If a single row cannot simultaneously satisfy two conflicting requirements**, split across multiple rows.
+
+---
+
+## 7. Output
 Save the output as: `outputs/06-sample-data-G02.sql`

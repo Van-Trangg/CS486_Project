@@ -4,78 +4,53 @@
 
 ## 1. Validation Scope
 
-This report validates the Logical Database Design (Step 3) against:
-- **BRA**: `outputs/01-business-requirement-analysis-G02.md` — 6 entities, 10 relationships, 21 business rules, 9 assumptions.
-- **ERD**: `outputs/02-erd-design-G02.md` — 6 entities, 10 relationships in Mermaid `erDiagram` crow's-foot notation.
-- **Logical Design**: `outputs/03-logical-design-G02.md` — 7 tables (6 entity tables + 1 junction table), with full schema specs, constraints, procedural objects, and traceability matrix.
+**Documents Reviewed:**
+- `outputs/01-business-requirement-analysis-G02.md` (BRA) — 22 business rules, 6 entities, 10 relationships, 9 assumptions
+- `outputs/02-erd-design-G02.md` (ERD) — 6 entities, 10 relationships in Mermaid `erDiagram` notation
+- `outputs/03-logical-design-G02.md` (Logical Design) — 7 tables, 18 CHECK constraints, 3 UNIQUE constraints, 3 DEFAULT constraints, 9 triggers, 1 UDF
 
-**Methodology**: Each stage evaluates a specific dimension (entity coverage, relationship mapping, key correctness, constraint validity, business rule enforcement, traceability) and concludes with evidence-based findings.
+**Validation Objective:** Determine whether the Logical Database Design correctly represents the ERD, preserves BRA requirements, enforces business rules, and maintains traceability.
+
+**DBMS Target:** Microsoft SQL Server
 
 ---
 
 ## 2. Entity Coverage Validation
 
-### Stage 1.1 — ERD-to-Table Mapping
+### Entity-to-Table Mapping
 
 | # | ERD Entity | Corresponding Table | Status | Notes |
-|---|------------|-------------------|--------|-------|
-| 1 | `USER` | `USER` (§2.1) | ✅ Present | Direct mapping. |
-| 2 | `SPACE` | `SPACE` (§2.2) | ✅ Present | Direct mapping. |
-| 3 | `FACILITY` | `FACILITY` (§2.3) | ✅ Present | Direct mapping. |
-| 4 | `BOOKING` | `BOOKING` (§2.5) | ✅ Present | Direct mapping. |
-| 5 | `USAGESESSION` | `USAGESESSION` (§2.6) | ✅ Present | Direct mapping. |
-| 6 | `MAINTENANCERECORD` | `MAINTENANCERECORD` (§2.7) | ✅ Present | Direct mapping. |
-| — | *Junction Table* | `SPACE_FACILITY` (§2.4) | ✅ Justified | Resolves M:N relationship `Space_Contains_Facility` (BRA §5.4, §6.4). Adds `quantity`, `operation_status`, `description` beyond ERD — these are operational enrichments without direct BRA backing but are not contradictory. |
+|---|-----------|-------------------|--------|-------|
+| 1 | `USER` | `USER` | ✅ Present | All attributes match ERD §2. |
+| 2 | `SPACE` | `SPACE` | ✅ Present | All attributes match ERD §2. |
+| 3 | `FACILITY` | `FACILITY` | ✅ Present | All attributes match ERD §2. |
+| 4 | `BOOKING` | `BOOKING` | ✅ Present | All attributes match ERD §2. |
+| 5 | `USAGESESSION` | `USAGESESSION` | ✅ Present | All attributes match ERD §2. |
+| 6 | `MAINTENANCERECORD` | `MAINTENANCERECORD` | ✅ Present | All attributes match ERD §2. |
+| — | *(none)* | `SPACE_FACILITY` | ✅ Justified | Junction table resolving the M:N `Space_Equipped_With_Facility` relationship (BRA §5.4). Standard relational mapping. Includes additional operational attributes (`quantity`, `operation_status`, `description`) not present in ERD — justified as they support facility inventory tracking. |
 
-**Finding**: All 6 ERD entities have corresponding relational tables. No entity is omitted. The single additional table (`SPACE_FACILITY`) is a justified junction-table resolution of the M:N relationship. No unjustified table exists.
-
-### Stage 1.2 — Internal Consistency of Referential Actions
-
-Referential actions as specified in the logical design (§1 — Relational Schema Mapping Decisions):
-
-| Foreign Key Context | Parent → Child | ON DELETE | ON UPDATE |
-|---------------------|----------------|-----------|-----------|
-| `BOOKING` → `SPACE` | `SPACE` → `BOOKING` | NO ACTION | NO ACTION |
-| `BOOKING` → `USER` (requester) | `USER` → `BOOKING` | NO ACTION | NO ACTION |
-| `BOOKING` → `USER` (approver) | `USER` → `BOOKING` | NO ACTION | NO ACTION |
-| `USAGESESSION` → `BOOKING` | `BOOKING` → `USAGESESSION` | NO ACTION | NO ACTION |
-| `USAGESESSION` → `USER` (check-in) | `USER` → `USAGESESSION` | NO ACTION | NO ACTION |
-| `USAGESESSION` → `USER` (check-out) | `USER` → `USAGESESSION` | NO ACTION | NO ACTION |
-| `MAINTENANCERECORD` → `SPACE` | `SPACE` → `MAINTENANCERECORD` | NO ACTION | NO ACTION |
-| `MAINTENANCERECORD` → `USER` (reporter) | `USER` → `MAINTENANCERECORD` | NO ACTION | NO ACTION |
-| `MAINTENANCERECORD` → `USER` (assigned) | `USER` → `MAINTENANCERECORD` | NO ACTION | NO ACTION |
-| `SPACE_FACILITY` → `SPACE` | `SPACE` → `SPACE_FACILITY` | **CASCADE** | (not specified) |
-| `SPACE_FACILITY` → `FACILITY` | `FACILITY` → `SPACE_FACILITY` | **CASCADE** | (not specified) |
-
-**Analysis**:
-- All history-preserving tables (`BOOKING`, `USAGESESSION`, `MAINTENANCERECORD`) consistently use `ON DELETE NO ACTION` for FKs referencing `USER` and `SPACE`. This aligns with BRA Requirements §18 (historical preservation) and Assumption 5 (soft deletion policy).
-- `SPACE_FACILITY` uses `ON DELETE CASCADE` on both FKs. This is appropriate because junction rows have no independent business meaning; if a `SPACE` or `FACILITY` is retired or removed, the association should be cleaned up. Since soft deletion is the policy (Assumption 5), cascade only applies to physical deletion of master records.
-- **No conflicting referential actions** between related tables. All child tables that reference the same parent consistently use the same action.
-
-**Verdict**: ✅ No issues.
+**Result:** All 6 ERD entities are fully covered. One additional table (`SPACE_FACILITY`) exists and is justified as the junction table for the M:N relationship. No omissions. No unjustified tables.
 
 ---
 
 ## 3. Relationship Mapping Validation
 
-For every ERD relationship, the cardinality, FK placement, and implementation pattern are validated.
+### ERD-to-Relational Mapping
 
-| # | ERD Relationship | ERD Cardinality | Expected Mapping | Logical Implementation | Status |
-|---|-----------------|-----------------|------------------|----------------------|--------|
-| 1 | `User_Requests_Booking` | USER (0,N) : (1,1) BOOKING | FK on N-side (BOOKING) | `BOOKING.requester_id` FK → `USER(user_id)`, NOT NULL | ✅ Correct |
-| 2 | `User_Approves_Booking` | USER (0,N) : (0,1) BOOKING | FK on N-side (BOOKING) | `BOOKING.approver_id` FK → `USER(user_id)`, NULL allowed | ✅ Correct |
-| 3 | `Space_Hosts_Booking` | SPACE (0,N) : (1,1) BOOKING | FK on N-side (BOOKING) | `BOOKING.space_code` FK → `SPACE(space_code)`, NOT NULL | ✅ Correct |
-| 4 | `Space_Contains_Facility` (aliased `Space_Equipped_With_Facility` in BRA §5.4) | SPACE (0,M) : (0,N) FACILITY | Junction Table | `SPACE_FACILITY` with composite PK `(space_code, facility_id)`, FKs to both parents | ✅ Correct |
-| 5 | `Booking_Has_UsageSession` | BOOKING (0,1) : (1,1) USAGESESSION | Shared PK (1:1) | `USAGESESSION.booking_id` is PK and FK → `BOOKING(booking_id)` | ✅ Correct |
-| 6 | `User_ChecksIn_UsageSession` | USER (0,N) : (1,1) USAGESESSION | FK on N-side (USAGESESSION) | `USAGESESSION.check_in_staff_id` FK → `USER(user_id)`, NOT NULL | ✅ Correct |
-| 7 | `User_ChecksOut_UsageSession` | USER (0,N) : (0,1) USAGESESSION | FK on N-side (USAGESESSION) | `USAGESESSION.check_out_staff_id` FK → `USER(user_id)`, NULL allowed | ✅ Correct |
-| 8 | `Space_Requires_Maintenance` | SPACE (0,N) : (1,1) MAINTENANCERECORD | FK on N-side (MAINTENANCERECORD) | `MAINTENANCERECORD.space_code` FK → `SPACE(space_code)`, NOT NULL | ✅ Correct |
-| 9 | `User_Reports_Maintenance` | USER (0,N) : (1,1) MAINTENANCERECORD | FK on N-side (MAINTENANCERECORD) | `MAINTENANCERECORD.reporter_id` FK → `USER(user_id)`, NOT NULL | ✅ Correct |
-| 10 | `User_Assigned_To_Maintenance` | USER (0,N) : (0,1) MAINTENANCERECORD | FK on N-side (MAINTENANCERECORD) | `MAINTENANCERECORD.assigned_staff_id` FK → `USER(user_id)`, NULL allowed | ✅ Correct |
+| # | ERD Relationship | ERD Cardinality | Expected Mapping | Logical Design Implementation | Status | Notes |
+|---|-----------------|----------------|-----------------|------------------------------|--------|-------|
+| 1 | User_Requests_Booking | (0,N):(1,1) | FK on N-side (Booking) | `BOOKING.requester_id` FK → `USER(user_id)`, NOT NULL | ✅ Correct | |
+| 2 | User_Approves_Booking | (0,N):(0,1) | FK on N-side (Booking) | `BOOKING.approver_id` FK → `USER(user_id)`, NULLABLE | ✅ Correct | Nullable FK correctly models optional participation |
+| 3 | Space_Hosts_Booking | (0,N):(1,1) | FK on N-side (Booking) | `BOOKING.space_code` FK → `SPACE(space_code)`, NOT NULL | ✅ Correct | |
+| 4 | Space_Equipped_With_Facility | (0,M):(0,N) | Junction Table | `SPACE_FACILITY(space_code, facility_id)` composite PK/FK | ✅ Correct | M:N correctly resolved via junction table |
+| 5 | Booking_Has_UsageSession | (0,1):(1,1) | Shared PK or UNIQUE FK | `USAGESESSION.booking_id` as PK and FK → `BOOKING(booking_id)` | ✅ Correct | 1:1 mapped via shared primary key |
+| 6 | User_ChecksIn_UsageSession | (0,N):(1,1) | FK on N-side (UsageSession) | `USAGESESSION.check_in_staff_id` FK → `USER(user_id)`, NOT NULL | ✅ Correct | |
+| 7 | User_ChecksOut_UsageSession | (0,N):(0,1) | FK on N-side (UsageSession) | `USAGESESSION.check_out_staff_id` FK → `USER(user_id)`, NULLABLE | ✅ Correct | Nullable FK correctly models optional checkout |
+| 8 | Space_Requires_Maintenance | (0,N):(1,1) | FK on N-side (MaintenanceRecord) | `MAINTENANCERECORD.space_code` FK → `SPACE(space_code)`, NOT NULL | ✅ Correct | |
+| 9 | User_Reports_Maintenance | (0,N):(1,1) | FK on N-side (MaintenanceRecord) | `MAINTENANCERECORD.reporter_id` FK → `USER(user_id)`, NOT NULL | ✅ Correct | |
+| 10 | User_Assigned_To_Maintenance | (0,N):(0,1) | FK on N-side (MaintenanceRecord) | `MAINTENANCERECORD.assigned_staff_id` FK → `USER(user_id)`, NULLABLE | ✅ Correct | Nullable FK models unassigned maintenance |
 
-**Naming Inconsistency (Minor)**: The BRA §5.4 names the Space–Facility relationship `Space_Equipped_With_Facility`, while the ERD Relationship Summary Table (§3) names it `Space_Contains_Facility`. The Mermaid label in the ERD uses `"contains"`. The meaning is identical and the logical implementation is unaffected.
-
-**Verdict**: ✅ All 10 relationships are correctly mapped according to expected relational patterns (FK on N-side, junction table for M:N, shared PK for 1:1). No incorrect mappings identified.
+**Result:** All 10 ERD relationships are correctly mapped. Cardinality is preserved. Foreign key placement is correct. The M:N relationship uses a junction table; the 1:1 relationship uses shared primary key. No incorrect mappings identified.
 
 ---
 
@@ -83,271 +58,293 @@ For every ERD relationship, the cardinality, FK placement, and implementation pa
 
 ### Primary Keys
 
-| Table | PK Column(s) | Type | Uniquely Identifies? | Correctly Supports Relationships? | Matches ERD? |
-|-------|-------------|------|---------------------|----------------------------------|--------------|
-| `USER` | `user_id` | Natural (VARCHAR(50)) | ✅ University account ID is unique per BR-1 | ✅ Referenced by BOOKING, USAGESESSION, MAINTENANCERECORD | ✅ |
-| `SPACE` | `space_code` | Natural (VARCHAR(50)) | ✅ Room code is unique per BR-4 | ✅ Referenced by BOOKING, MAINTENANCERECORD, SPACE_FACILITY | ✅ |
-| `FACILITY` | `facility_id` | Surrogate (INT IDENTITY) | ✅ Auto-increment guarantees uniqueness | ✅ Referenced by SPACE_FACILITY | ✅ |
-| `SPACE_FACILITY` | `(space_code, facility_id)` | Composite (natural + surrogate) | ✅ Prevents duplicate assignments | ✅ Junction FKs reference both parents | ✅ (M:N resolution) |
-| `BOOKING` | `booking_id` | Surrogate (INT IDENTITY) | ✅ Auto-increment guarantees uniqueness | ✅ Referenced by USAGESESSION | ✅ |
-| `USAGESESSION` | `booking_id` | Shared PK/FK (INT) | ✅ 1:1 — each booking has at most one session | ✅ FK → BOOKING enforces existence | ✅ |
-| `MAINTENANCERECORD` | `maintenance_id` | Surrogate (INT IDENTITY) | ✅ Auto-increment guarantees uniqueness | ✅ Referenced by (none) — leaf table | ✅ |
+| Table | Primary Key | Type | Validation | Notes |
+|-------|------------|------|-----------|-------|
+| `USER` | `user_id` (`VARCHAR(50)`) | Natural key | ✅ Valid | Unique university account identifier. Matches BRA §4.1. |
+| `SPACE` | `space_code` (`VARCHAR(50)`) | Natural key | ✅ Valid | Unique room identifier. Matches BRA §4.2. |
+| `FACILITY` | `facility_id` (`INT IDENTITY`) | Surrogate key | ✅ Valid | Auto-incrementing. Matches BRA §4.3. |
+| `SPACE_FACILITY` | (`space_code`, `facility_id`) | Composite key | ✅ Valid | Both components are foreign keys. Prevents duplicate facility assignments. |
+| `BOOKING` | `booking_id` (`INT IDENTITY`) | Surrogate key | ✅ Valid | Auto-incrementing. Matches BRA §4.4. |
+| `USAGESESSION` | `booking_id` (`INT`) | Shared PK (FK) | ✅ Valid | Implements 1:1 relationship with BOOKING. Matches BRA §4.5. |
+| `MAINTENANCERECORD` | `maintenance_id` (`INT IDENTITY`) | Surrogate key | ✅ Valid | Auto-incrementing. Matches BRA §4.6. |
 
 ### Foreign Keys
 
-| FK Column(s) | Source Table | Referenced Table | Correct Placement? |
-|-------------|-------------|-----------------|-------------------|
-| `space_code` | BOOKING | SPACE | ✅ N-side of 1:N |
-| `requester_id` | BOOKING | USER | ✅ N-side of 1:N |
-| `approver_id` (nullable) | BOOKING | USER | ✅ N-side of 1:N |
-| `booking_id` (PK/FK) | USAGESESSION | BOOKING | ✅ Shared PK for 1:1 |
-| `check_in_staff_id` | USAGESESSION | USER | ✅ N-side of 1:N |
-| `check_out_staff_id` (nullable) | USAGESESSION | USER | ✅ N-side of 1:N |
-| `space_code` | MAINTENANCERECORD | SPACE | ✅ N-side of 1:N |
-| `reporter_id` | MAINTENANCERECORD | USER | ✅ N-side of 1:N |
-| `assigned_staff_id` (nullable) | MAINTENANCERECORD | USER | ✅ N-side of 1:N |
-| `space_code` (composite PK part) | SPACE_FACILITY | SPACE | ✅ Junction FK |
-| `facility_id` (composite PK part) | SPACE_FACILITY | FACILITY | ✅ Junction FK |
+| Table | Foreign Key | References | Nullable | Validation | Notes |
+|-------|-----------|-----------|----------|-----------|-------|
+| `BOOKING` | `space_code` | `SPACE(space_code)` | No | ✅ Valid | |
+| `BOOKING` | `requester_id` | `USER(user_id)` | No | ✅ Valid | |
+| `BOOKING` | `approver_id` | `USER(user_id)` | Yes | ✅ Valid | Nullable until booking is reviewed |
+| `USAGESESSION` | `booking_id` | `BOOKING(booking_id)` | No | ✅ Valid | Shared PK/FK for 1:1 |
+| `USAGESESSION` | `check_in_staff_id` | `USER(user_id)` | No | ✅ Valid | |
+| `USAGESESSION` | `check_out_staff_id` | `USER(user_id)` | Yes | ✅ Valid | Nullable until checkout occurs |
+| `SPACE_FACILITY` | `space_code` | `SPACE(space_code)` | No | ✅ Valid | Composite PK part 1 |
+| `SPACE_FACILITY` | `facility_id` | `FACILITY(facility_id)` | No | ✅ Valid | Composite PK part 2 |
+| `MAINTENANCERECORD` | `space_code` | `SPACE(space_code)` | No | ✅ Valid | |
+| `MAINTENANCERECORD` | `reporter_id` | `USER(user_id)` | No | ✅ Valid | |
+| `MAINTENANCERECORD` | `assigned_staff_id` | `USER(user_id)` | Yes | ✅ Valid | Nullable until staff assigned |
 
 ### Candidate / Alternate Keys
 
-| Table | Alternate Key | Mechanism | Status |
-|-------|--------------|-----------|--------|
-| `USER` | `email` | `UNIQUE` constraint on `email` | ✅ Enforced |
-| `FACILITY` | `facility_name` | `UNIQUE` constraint on `facility_name` | ✅ Enforced |
+| Table | Alternate Key | Constraint | Validation | Notes |
+|-------|--------------|-----------|-----------|-------|
+| `USER` | `email` | `UQ_USER_EMAIL` UNIQUE | ✅ Valid | Matches BRA §4.1 candidate identifier |
+| `FACILITY` | `facility_name` | `UQ_FACILITY_NAME` UNIQUE | ✅ Valid | Matches BRA §4.3 candidate identifier |
 
-**Verdict**: ✅ All keys are correctly chosen, uniquely identify records, and support relationships as designed in the ERD.
+**Result:** All keys are correctly defined. Primary keys uniquely identify records. Foreign keys correctly support relationships. The composite key in `SPACE_FACILITY` is appropriate for the junction table. Alternate keys are enforced with UNIQUE constraints.
 
 ---
 
 ## 5. Constraint Validation
 
-### Stage 4.1 — NOT NULL, UNIQUE, CHECK, DEFAULT, Referential Integrity
+### 5.1. NOT NULL Constraints
 
-**NOT NULL**: All PK columns and mandatory descriptive columns have `NOT NULL` as specified. Nullable columns (`phone_number`, `approver_id`, `decision_time`, `decision_note`, `rejection_reason`, `check_out_staff_id`, `actual_end`, `final_condition`, `usage_notes`, `assigned_staff_id`, `completion_time`, `result_note`, `facility_description`, `description`) correctly allow NULLs per their semantics.
+| Table | Column | Nullable | Validation | Evidence |
+|-------|--------|----------|-----------|----------|
+| `USER` | `phone_number` | NULL | ✅ Aligns with BRA | BRA §4.1 specifies nullable contact phone |
+| `USER` | All other columns | NOT NULL | ✅ Correct | Core identity fields mandatory |
+| `SPACE` | All columns | NOT NULL | ✅ Correct | Core space information mandatory |
+| `FACILITY` | `facility_description` | NULL | ✅ Aligns with BRA | BRA §4.3 allows nullable description |
+| `FACILITY` | `facility_id`, `facility_name` | NOT NULL | ✅ Correct | |
+| `BOOKING` | `approver_id`, `decision_time`, `decision_note`, `rejection_reason` | NULL | ✅ Aligns with BRA | Nullable until approval/rejection decision made |
+| `USAGESESSION` | `check_out_staff_id`, `actual_end`, `final_condition`, `usage_notes` | NULL | ✅ Aligns with BRA | Nullable until checkout occurs |
+| `MAINTENANCERECORD` | `assigned_staff_id`, `completion_time`, `result_note` | NULL | ✅ Aligns with BRA | Nullable until assignment/completion |
 
-**UNIQUE**: Two UNIQUE constraints defined:
-- `UQ_USER_EMAIL` on `USER(email)` — enforces BR-2 alternate identifier requirement. ✅
-- `UQ_FACILITY_NAME` on `FACILITY(facility_name)` — enforces unique facility catalog names per BR-7. ✅
+### 5.2. CHECK Constraints
 
-**CHECK constraints**: All 15 CHECK constraints (as listed in §3 of the logical design) are evaluated:
+| Constraint | Table | Rule | Validation | BRA Reference |
+|-----------|-------|------|-----------|--------------|
+| `CK_USER_ROLE` | `USER` | `role IN ('Student', 'Lecturer', 'Teaching Assistant', 'Facility Staff', 'Department Administrator', 'Facility Manager')` | ✅ Correct | BR-3 (BRA §7.3) |
+| `CK_USER_ACCOUNT_STATUS` | `USER` | `account_status IN ('Active', 'Suspended', 'Inactive')` | ✅ Correct | BR-2 (BRA §7.2) |
+| `CK_SPACE_TYPE` | `SPACE` | `space_type IN ('Auditorium', 'Classroom', 'Computer Laboratory', 'Project Laboratory', 'Meeting Room', 'Student Workspace')` | ✅ Correct | BR-5 (BRA §7.5) |
+| `CK_SPACE_CAPACITY` | `SPACE` | `capacity > 0` | ✅ Correct | BR-5 (BRA §7.5) |
+| `CK_SPACE_CURRENT_STATUS` | `SPACE` | `current_status IN ('Available', 'In Use', 'Under Maintenance', 'Temporarily Closed', 'Retired')` | ✅ Correct | BR-6 (BRA §7.6) |
+| `CK_SPACE_FACILITY_QUANTITY` | `SPACE_FACILITY` | `quantity > 0` | ✅ Correct | Operational attribute |
+| `CK_SPACE_FACILITY_STATUS` | `SPACE_FACILITY` | `operation_status IN ('Operational', 'Partially Operational', 'Broken')` | ✅ Correct | Operational attribute |
+| `CK_BOOKING_TIME_ORDER` | `BOOKING` | `requested_end > requested_start` | ✅ Correct | BR-8 (BRA §7.8), Assumption 6 |
+| `CK_BOOKING_PARTICIPANTS` | `BOOKING` | `expected_participants > 0` | ✅ Correct | BR-8 (BRA §7.8) |
+| `CK_BOOKING_PURPOSE` | `BOOKING` | `purpose IN ('Lecture', 'Examination', 'Seminar', 'Workshop', 'Meeting', 'Student Activity', 'Administrative Event')` | ✅ Correct | BR-9 (BRA §7.9) |
+| `CK_BOOKING_STATUS` | `BOOKING` | `booking_status IN ('Pending', 'Approved', 'Rejected', 'Cancelled', 'Checked In', 'Completed', 'No-Show')` | ✅ Correct | BR-10 (BRA §7.10) |
+| `CK_BOOKING_FUTURE_START` | `BOOKING` | `requested_start >= created_at` | ⚠️ Partial | BR-20 (BRA §7.20) — See §5.5 |
+| `CK_BOOKING_REJECTION_REASON` | `BOOKING` | `booking_status <> 'Rejected' OR rejection_reason IS NOT NULL` | ✅ Correct | BR-14 (BRA §7.14) |
+| `CK_BOOKING_CAPACITY_LIMIT` | `BOOKING` | `dbo.fn_CheckSpaceCapacity(space_code, expected_participants) = 1` | ✅ Correct | BR-19 (BRA §7.19) |
+| `CK_USAGE_TIME_ORDER` | `USAGESESSION` | `actual_end > actual_start` | ✅ Correct | BR-16 (BRA §7.16) |
+| `CK_MAINTENANCE_TIME_ORDER` | `MAINTENANCERECORD` | `completion_time > start_time` | ✅ Correct | BR-17 (BRA §7.17) |
+| `CK_MAINTENANCE_STATUS` | `MAINTENANCERECORD` | `maintenance_status IN ('Reported', 'In Progress', 'Resolved', 'Cancelled')` | ✅ Correct | BR-17 (BRA §7.17) |
+| `CK_MAINTENANCE_PROBLEM_TYPE` | `MAINTENANCERECORD` | `problem_type IN ('Projector Failure', 'Air-Conditioning Issue', 'Cleaning Issue', 'Furniture Damage', 'Network Issue', 'Other')` | ✅ Correct | BR-17 (BRA §7.17) |
 
-| Constraint | Table | Purpose | Valid? |
-|-----------|-------|---------|--------|
-| `CK_USER_ROLE` | USER | Restrict role to predefined set (BR-3) | ✅ |
-| `CK_USER_ACCOUNT_STATUS` | USER | Restrict account status values | ✅ |
-| `CK_SPACE_TYPE` | SPACE | Restrict space type to predefined set (BR-5/6) | ✅ |
-| `CK_SPACE_CAPACITY` | SPACE | Enforce capacity > 0 (BR-5) | ✅ |
-| `CK_SPACE_CURRENT_STATUS` | SPACE | Restrict status values (BR-6) | ✅ |
-| `CK_SPACE_FACILITY_QUANTITY` | SPACE_FACILITY | Quantity > 0 | ✅ |
-| `CK_SPACE_FACILITY_STATUS` | SPACE_FACILITY | Restrict operation_status values | ✅ |
-| `CK_BOOKING_TIME_ORDER` | BOOKING | `requested_end > requested_start` (Assumption 6) | ✅ |
-| `CK_BOOKING_PARTICIPANTS` | BOOKING | `expected_participants > 0` | ✅ |
-| `CK_BOOKING_PURPOSE` | BOOKING | Restrict purpose to predefined list (BR-9) | ✅ |
-| `CK_BOOKING_STATUS` | BOOKING | Restrict status to predefined list (BR-10) | ✅ |
-| `CK_BOOKING_FUTURE_START` | BOOKING | `requested_start >= created_at` (BR-20) | ⚠️ Partially effective (see 4.3) |
-| `CK_BOOKING_REJECTION_REASON` | BOOKING | Rejected bookings must have reason (BR-14) | ✅ |
-| `CK_BOOKING_CAPACITY_LIMIT` | BOOKING | `expected_participants <= space.capacity` via UDF (BR-19) | ✅ |
-| `CK_USAGE_TIME_ORDER` | USAGESESSION | `actual_end > actual_start` (Assumption 6) | ✅ |
-| `CK_MAINTENANCE_TIME_ORDER` | MAINTENANCERECORD | `completion_time > start_time` (Assumption 6) | ✅ |
-| `CK_MAINTENANCE_STATUS` | MAINTENANCERECORD | Restrict maintenance status values (BR-17) | ✅ |
-| `CK_MAINTENANCE_PROBLEM_TYPE` | MAINTENANCERECORD | Restrict problem type values (BR-17) | ✅ |
+### 5.3. DEFAULT Constraints
 
-**DEFAULT constraints**:
-- `DF_BOOKING_CREATED_AT` → `GETDATE()` for `created_at` ✅
-- `DF_SPACE_FACILITY_QUANTITY` → `1` for `quantity` ✅
-- `DF_SPACE_FACILITY_STATUS` → `'Operational'` for `operation_status` ✅
+| Constraint | Table | Column | Default Value | Validation |
+|-----------|-------|--------|--------------|-----------|
+| `DF_SPACE_FACILITY_QUANTITY` | `SPACE_FACILITY` | `quantity` | `1` | ✅ Correct |
+| `DF_SPACE_FACILITY_STATUS` | `SPACE_FACILITY` | `operation_status` | `'Operational'` | ✅ Correct |
+| `DF_BOOKING_CREATED_AT` | `BOOKING` | `created_at` | `GETDATE()` | ✅ Correct |
 
-**Referential Integrity**: All FKs correctly defined with appropriate referential actions (see Stage 1.2). ✅
+### 5.4. UNIQUE Constraints
 
-### Stage 4.2 — Referential Integrity & History Preservation
+| Constraint | Table | Column | Validation | Notes |
+|-----------|-------|--------|-----------|-------|
+| `UQ_USER_EMAIL` | `USER` | `email` | ✅ Correct | Alternate key per BRA §4.1 |
+| `UQ_FACILITY_NAME` | `FACILITY` | `facility_name` | ✅ Correct | Alternate key per BRA §4.3 |
 
-Transactional/historical tables: `BOOKING`, `USAGESESSION`, `MAINTENANCERECORD`.
+### 5.5. Referential Integrity Actions
 
-- All FKs referencing these historical tables use `ON DELETE NO ACTION`, preventing cascade deletion of historical records.
-- The only `CASCADE` rules are on the junction table `SPACE_FACILITY`, which has no historical significance — if a `SPACE` or `FACILITY` is removed, the association rows should be cleaned up.
-- **BRA Requirement §18** explicitly states "The system must preserve historical records." The referential actions are fully consistent with this requirement.
+| Parent Table | Child Table | FK Column(s) | Action | Validation |
+|-------------|------------|-------------|--------|-----------|
+| `BOOKING` | `USAGESESSION` | `booking_id` | ON DELETE NO ACTION, ON UPDATE NO ACTION | ✅ Correct — Protects historical usage session data |
+| `SPACE` | `SPACE_FACILITY` | `space_code` | ON DELETE CASCADE, ON UPDATE NO ACTION | ✅ Correct — Junction table cleanup; aligns with soft-deletion policy (space records are never physically deleted; cascade only triggers on actual deletion) |
+| `FACILITY` | `SPACE_FACILITY` | `facility_id` | ON DELETE CASCADE, ON UPDATE NO ACTION | ✅ Correct — Junction table cleanup |
+| `USER` | `BOOKING` (requester) | `requester_id` | ON DELETE NO ACTION | ✅ Correct — Protects historical booking records |
+| `USER` | `BOOKING` (approver) | `approver_id` | ON DELETE NO ACTION | ✅ Correct |
+| `USER` | `USAGESESSION` (check-in) | `check_in_staff_id` | ON DELETE NO ACTION | ✅ Correct |
+| `USER` | `USAGESESSION` (check-out) | `check_out_staff_id` | ON DELETE NO ACTION | ✅ Correct |
+| `USER` | `MAINTENANCERECORD` (reporter) | `reporter_id` | ON DELETE NO ACTION | ✅ Correct |
+| `USER` | `MAINTENANCERECORD` (assigned) | `assigned_staff_id` | ON DELETE NO ACTION | ✅ Correct |
+| `SPACE` | `BOOKING` | `space_code` | ON DELETE NO ACTION | ✅ Correct — Protects historical booking records |
+| `SPACE` | `MAINTENANCERECORD` | `space_code` | ON DELETE NO ACTION | ✅ Correct — Protects historical maintenance records |
 
-**Verdict**: ✅ No high-risk findings. The design correctly preserves historical records.
+**Conflict Check:** All referential actions are internally consistent. No conflicting rules found between related tables. The `ON DELETE CASCADE` on `SPACE_FACILITY` is appropriate for a junction table and does not conflict with history preservation because soft-deletion policy prevents physical deletion of parent records.
 
-### Stage 4.3 — Future-Time Constraints (No Past-Dated Events)
+### 5.6. Referential Integrity & History Preservation (Stage 4.2)
 
-**Column evaluated**: `BOOKING.requested_start`
+**Tables storing transactional history:** `BOOKING`, `USAGESESSION`, `MAINTENANCERECORD`
 
-**Constraint**: `CK_BOOKING_FUTURE_START CHECK (requested_start >= created_at)`
+**Assessment:** None of the foreign keys referencing these tables use `ON DELETE CASCADE`. All use `ON DELETE NO ACTION`, which aligns with the BRA requirement for historical record preservation (BR-18, BRA §7.18) and the soft-deletion policy (Assumption 5).
 
-**Analysis**:
-- This constraint uses a column-to-column comparison (no non-deterministic function in the CHECK), which is valid in SQL Server.
-- At INSERT time, `created_at` defaults to `GETDATE()`, so `requested_start >= GETDATE()` is effectively enforced for new records.
-- However, `created_at` is immutable after creation (no UPDATE trigger changes it). On UPDATE of a booking record, the constraint only checks `requested_start >= created_at` (the original creation timestamp), NOT `requested_start >= current_timestamp`. This means an UPDATE could set `requested_start` to a value that is after the original creation time but before the current time.
-- **BRA Requirement BR-20**: "Students and lecturers may only submit booking requests for future time periods."
+**Result: ✅ No high-risk findings.** Historical records are protected.
 
-**Risk level**: Medium Risk
+### 5.7. Future-Time Constraints (Stage 4.3)
 
-**Recommendation**: Add an `AFTER INSERT, UPDATE` trigger on `BOOKING` that compares `requested_start` against `GETDATE()` and rolls back if `requested_start < GETDATE()`. Since SQL Server does not allow `GETDATE()` in CHECK constraints, a trigger is the appropriate DB-level mechanism. Alternatively, enforce this rule entirely at the application layer.
+**Column assessed:** `BOOKING.requested_start` — intended to represent a future scheduled booking time.
 
-**Other columns checked for future-time relevance**:
-- `MAINTENANCERECORD.start_time` — used for maintenance scheduling; no future-time constraint exists. Not flagged because the BRA does not explicitly require future-dated maintenance records. However, if maintenance scheduling requires future-only dates, the same trigger pattern should be applied.
-- `USAGESESSION.actual_start` — records real check-in time, not a future-scheduled time. No future-time constraint needed.
+**Mechanisms present:**
+1. `CK_BOOKING_FUTURE_START` CHECK constraint: `requested_start >= created_at` — this is a **weak approximation** because `created_at` defaults to `GETDATE()` but could be manually overridden.
+2. `TR_BOOKING_FUTURE_START_ENFORCEMENT` trigger (AFTER INSERT, UPDATE): Enforces `requested_start < GETDATE()` only for non-staff users, with role exemption for `Facility Staff` and `Facility Manager` — aligns with BR-20 (BRA §7.20).
+
+**Assessment:** The CHECK constraint alone would be insufficient, but the trigger provides the actual enforcement. In Microsoft SQL Server, `GETDATE()` cannot be used in CHECK constraints, so the trigger-based approach is correct.
+
+**Risk Level: ⚠️ Medium** — The `CK_BOOKING_FUTURE_START` CHECK constraint is weakly defined (`requested_start >= created_at` lacks robustness if `created_at` is manually set). The trigger provides adequate enforcement for non-staff users. No constraint exists to prevent backdating of `MAINTENANCERECORD.start_time`, though no requirement explicitly demands this.
+
+**Recommendation:** Consider adding an `AFTER INSERT, UPDATE` trigger on `MAINTENANCERECORD` to prevent backdated `start_time` values if this becomes a business requirement.
 
 ---
 
 ## 6. Business Rule Coverage Analysis
 
-Each business rule from BRA §7 is evaluated for enforcement mechanism and coverage.
+| # | Business Rule | BRA Reference | Enforcement Mechanism(s) | Enforcement Level | Justification |
+|---|--------------|--------------|------------------------|-------------------|--------------|
+| 1 | **Mandatory Account Rule** — Every user must have a valid university account | §7.1 (BR-1) | PK on `user_id` (NOT NULL), `UQ_USER_EMAIL` UNIQUE | ✅ **Fully Enforced** | PK ensures non-null, unique identifier. Email UNIQUE ensures alternate identification. |
+| 2 | **Standard User Information** — Record user ID, name, email, phone, role, department, account status | §7.2 (BR-2) | Column definitions with NOT NULL/data types, CHECK constraints on `role` and `account_status` | ✅ **Fully Enforced** | All required columns present with appropriate types. Nullable `phone_number` aligns with BRA. |
+| 3 | **User Roles** — Constrained to predefined set | §7.3 (BR-3) | `CK_USER_ROLE` CHECK constraint | ✅ **Fully Enforced** | |
+| 4 | **Space Unique Code** — Each room has unique identifier | §7.4 (BR-4) | PK on `space_code` | ✅ **Fully Enforced** | |
+| 5 | **Space Attributes** — Store name, type, building, floor, room, capacity, status, policy | §7.5 (BR-5) | Column definitions, `CK_SPACE_TYPE`, `CK_SPACE_CAPACITY`, `CK_SPACE_CURRENT_STATUS` | ✅ **Fully Enforced** | |
+| 6 | **Space Statuses** — Predefined set | §7.6 (BR-6) | `CK_SPACE_CURRENT_STATUS` CHECK constraint | ✅ **Fully Enforced** | |
+| 7 | **Facilities Catalog and Mapping** — Track facilities in spaces | §7.7 (BR-7) | `FACILITY` table + `SPACE_FACILITY` junction table with FKs | ✅ **Fully Enforced** | |
+| 8 | **Booking Submission Requirements** — Space, start/end, purpose, participants | §7.8 (BR-8) | NOT NULL constraints on all required columns | ✅ **Fully Enforced** | |
+| 9 | **Booking Purposes** — Predefined list | §7.9 (BR-9) | `CK_BOOKING_PURPOSE` CHECK constraint | ✅ **Fully Enforced** | |
+| 10 | **Booking Status List** — Predefined set | §7.10 (BR-10) | `CK_BOOKING_STATUS` CHECK constraint | ✅ **Fully Enforced** | |
+| 11 | **Double Booking Prevention** — No overlapping approved bookings for same space | §7.11 (BR-11) | `TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE` trigger | ✅ **Fully Enforced** | Enforced at DB level via trigger; application-level check recommended for UX. |
+| 12 | **Unavailable Spaces Blocked** — No booking for maintenance/closed/retired spaces | §7.12 (BR-12) | `TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE` trigger (checking SPACE status + MAINTENANCERECORD overlap); `TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP` for bidirectional protection | ✅ **Fully Enforced** | Bidirectional overlap prevention between bookings and maintenance records. |
+| 13 | **Approval Tracking** — Record approver, decision time, notes | §7.13 (BR-13) | Columns `approver_id`, `decision_time`, `decision_note`; `TR_BOOKING_VALIDATE_APPROVER_ROLE` for role enforcement | ✅ **Fully Enforced** | |
+| 14 | **Rejection Justification** — Store reason for rejection | §7.14 (BR-14) | `CK_BOOKING_REJECTION_REASON` CHECK constraint | ✅ **Fully Enforced** | Guarantees non-null rejection_reason when status = 'Rejected'. |
+| 15 | **Usage Session Check-in** — Log start time, staff, initial condition | §7.15 (BR-15) | `USAGESESSION` columns `check_in_staff_id`, `actual_start`, `initial_condition` (all NOT NULL); `TR_USAGESESSION_VALIDATE_STAFF_ROLES` for role enforcement | ✅ **Fully Enforced** | |
+| 16 | **Usage Session Completion** — Log end time, final condition, usage notes | §7.16 (BR-16) | `USAGESESSION` columns `check_out_staff_id`, `actual_end`, `final_condition`, `usage_notes` (nullable); `CK_USAGE_TIME_ORDER` for temporal validity | ✅ **Fully Enforced** | |
+| 17 | **Maintenance Logging** — Track space, reporter, assigned staff, timestamps, status, results | §7.17 (BR-17) | `MAINTENANCERECORD` table with CHECK constraints and `TR_MAINTENANCE_VALIDATE_ASSIGNED_ROLE` trigger | ✅ **Fully Enforced** | |
+| 18 | **Historical and Operational Reports** — Preserve logs, support viewing history | §7.18 (BR-18) | `ON DELETE NO ACTION` on all historical FKs; `TR_BOOKING_STATUS_AND_AUDIT` prevents deletion of cancelled bookings | ⚠️ **Partially Enforced** | The database schema preserves data (prevents deletion). Actual report viewing, querying, and UI are application-layer responsibilities. The schema enables but does not enforce reporting. |
+| 19 | **Capacity Limit Rule** — Participants ≤ space capacity | §7.19 (BR-19) | `CK_BOOKING_CAPACITY_LIMIT` via `dbo.fn_CheckSpaceCapacity` UDF | ✅ **Fully Enforced** | UDF integrated into CHECK constraint validates against current SPACE.capacity. |
+| 20 | **Future Booking Requirement** — Non-staff users can only book future time slots | §7.20 (BR-20) | `CK_BOOKING_FUTURE_START` CHECK (weak); `TR_BOOKING_FUTURE_START_ENFORCEMENT` trigger (strong) with role exemption | ✅ **Fully Enforced** | Trigger provides actual enforcement. CHECK constraint is a secondary safeguard. |
+| 21 | **Booking Cancellation Rule** — Cancel only from Pending/Approved; keep cancelled records | §7.21 (BR-21) | `TR_BOOKING_STATUS_AND_AUDIT` trigger | ✅ **Fully Enforced** | Trigger enforces state machine and protects deleted/cancelled records. |
+| 22 | **Booking Modification Rule** — No changes to space/start/end after approval | §7.22 (BR-22) | `TR_BOOKING_LOCK_APPROVED_FIELDS` trigger | ✅ **Fully Enforced** | Trigger compares old/new values and blocks modification post-approval. |
 
-| # | Business Rule | BRA Source | Enforcement Mechanism | Status | Notes |
-|---|--------------|-----------|----------------------|--------|-------|
-| BR-1 | Mandatory university account | §7.1 | PK on `user_id` (NOT NULL) | ✅ Fully Enforced | User ID as PK ensures every user has a university account identifier. |
-| BR-2 | Record user info (ID, name, email, phone, role, dept, status) | §7.2 | All required columns present in `USER` table with NOT NULL constraints | ✅ Fully Enforced | `phone_number` is the only nullable field, which matches the BRA description. |
-| BR-3 | User roles constrained to predefined list | §7.3 | `CK_USER_ROLE` CHECK constraint | ✅ Fully Enforced | CHECK validates against the exact list of 6 roles from BRA §4.1. |
-| BR-4 | Unique space code | §7.4 | PK on `space_code` | ✅ Fully Enforced | |
-| BR-5 | Space attributes (name, type, building, floor, room, capacity, status, policy) | §7.5 | All required columns present in `SPACE` table with NOT NULL | ✅ Fully Enforced | |
-| BR-6 | Space status constrained to predefined set | §7.6 | `CK_SPACE_CURRENT_STATUS` CHECK | ✅ Fully Enforced | Includes all 5 statuses from BRA §4.2. |
-| BR-7 | Facilities catalog and space mapping | §7.7 | `FACILITY` table + `SPACE_FACILITY` junction table | ✅ Fully Enforced | Catalog stores facility types; junction table maps spaces to facilities. |
-| BR-8 | Booking requires space, start/end, purpose, participants | §7.8 | `BOOKING` table with NOT NULL constraints on all required columns | ✅ Fully Enforced | |
-| BR-9 | Booking purpose constrained to predefined list | §7.9 | `CK_BOOKING_PURPOSE` CHECK | ✅ Fully Enforced | CHECK matches the 7 purposes from BRA §4.4. |
-| BR-10 | Booking status constrained to predefined set | §7.10 | `CK_BOOKING_STATUS` CHECK | ✅ Fully Enforced | CHECK matches the 7 statuses from BRA §4.4. |
-| BR-11 | Double booking prevention | §7.11 | `TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE` trigger on INSERT, UPDATE | ✅ Fully Enforced | Trigger checks all approved bookings for time-range overlap on the same space. |
-| BR-12 | Block unavailable spaces (maintenance/closed/retired) | §7.12 | Same trigger as BR-11 | ⚠️ Partially Enforced | The trigger prevents booking insertion/update when overlapping maintenance exists. However, the check is **unidirectional**: it only fires on BOOKING changes, not on MAINTENANCERECORD changes. If a maintenance record is INSERTED or UPDATED that overlaps with existing approved bookings, those bookings are not flagged or rejected. |
-| BR-13 | Approval tracking (approver, time, note) | §7.13 | `approver_id`, `decision_time`, `decision_note` columns in `BOOKING` | ✅ Fully Enforced | Columns present and nullable to allow pending state. |
-| BR-14 | Rejection justification required | §7.14 | `CK_BOOKING_REJECTION_REASON` CHECK constraint | ✅ Fully Enforced | CHECK enforces: `booking_status <> 'Rejected' OR rejection_reason IS NOT NULL`. |
-| BR-15 | Usage session check-in (start, staff, condition) | §7.15 | `USAGESESSION` table with NOT NULL on `check_in_staff_id`, `actual_start`, `initial_condition` | ✅ Fully Enforced | No trigger prevents creating a USAGESESSION for a non-approved booking — this is implicit trust in application workflow per Assumption 9. |
-| BR-16 | Usage session completion (end, condition, notes) | §7.16 | Nullable columns `actual_end`, `final_condition`, `usage_notes` in `USAGESESSION` | ✅ Fully Enforced | |
-| BR-17 | Maintenance logging (space, reporter, assigned, desc, times, status, result) | §7.17 | All required columns present in `MAINTENANCERECORD` | ✅ Fully Enforced | CHECK constraints on `maintenance_status` and `problem_type`. |
-| BR-18 | Historical record preservation | §7.18 | `ON DELETE NO ACTION` on all FKs referencing transactional tables; soft-deletion assumption (Assumption 5) | ✅ Fully Enforced | BR-21 trigger also prevents deletion of cancelled bookings. Referential integrity actions protect against data loss. |
-| BR-19 | Capacity limit (participants ≤ space capacity) | §7.19 | `CK_BOOKING_CAPACITY_LIMIT` via `dbo.fn_CheckSpaceCapacity` UDF | ✅ Fully Enforced | UDF looks up `SPACE.capacity` and compares. |
-| BR-20 | Future booking (requested_start must be in future) | §7.20 | `CK_BOOKING_FUTURE_START CHECK (requested_start >= created_at)` | ⚠️ Partially Enforced | Works at INSERT (created_at = GETDATE()), but does not prevent UPDATE from setting past requested_start. See Stage 4.3. |
-| BR-21 | Cancel only from Pending/Approved; keep cancelled records | §7.21 | `TR_BOOKING_STATUS_AND_AUDIT` trigger on UPDATE, DELETE | ✅ Fully Enforced | Trigger verifies source status before cancellation and blocks deletion of cancelled records. |
+### Summary
 
-### Business Rules Not Enforced at Database Level
+| Enforcement Level | Count | Business Rules |
+|-----------------|-------|---------------|
+| ✅ **Fully Enforced** | 21 | BR-1 through BR-17, BR-19 through BR-22 |
+| ⚠️ **Partially Enforced** | 1 | BR-18 (Historical and Operational Reports) |
+| ❌ **Not Enforced** | 0 | — |
 
-The following business-related rules from the BRA and Assumptions are not enforced by the schema:
-
-| Rule | Source | Details |
-|------|--------|---------|
-| **Role-based permission for approval/check-in** | Assumption 1 (§8) | Only `Facility Staff` or `Facility Manager` should review/decide bookings, check in/out, and be assigned to maintenance. Not enforced by any constraint or trigger. An application-layer check is required. |
-| **Check-in/No-Show window** | Assumption 3 (§8) | No database enforcement of the 30-minute check-in window. Application-layer logic required. |
-| **Auto status change for maintenance** | Assumption 4 (§8) | No trigger automatically sets `SPACE.current_status = 'Under Maintenance'` when an active maintenance record exists. Application or scheduled process required. |
-| **Booking check-in allowed only for Approved bookings** | Assumption 9 (§8) | No trigger prevents creating a `USAGESESSION` for a `BOOKING` that is not in `'Approved'` status. Application-layer workflow assumed. |
+**BR-18 Justification:** The database preserves historical records through referential integrity (`ON DELETE NO ACTION`) and prevents deletion of cancelled bookings (trigger). However, "viewing booking history, upcoming bookings, spaces under maintenance, and no-show bookings" (BRA §7.18) requires application-layer query logic and UI. The schema enables these queries but cannot enforce them at the database level. This is an inherent limitation of database design — reporting is an application responsibility.
 
 ---
 
 ## 7. Traceability Validation
 
-### Requirement → ERD → Relational Schema → Constraint
+### Requirement → ERD → Schema → Constraint
 
-| BRA Requirement | ERD Element | Relational Schema Element | Constraint(s) | Traceable? |
-|----------------|-------------|--------------------------|---------------|-----------|
-| §4.1 User attributes | USER entity | USER table | PK, UQ_USER_EMAIL, CK_USER_ROLE, CK_USER_ACCOUNT_STATUS | ✅ Full |
-| §4.2 Space attributes | SPACE entity | SPACE table | PK, CK_SPACE_TYPE, CK_SPACE_CAPACITY, CK_SPACE_CURRENT_STATUS | ✅ Full |
-| §4.3 Facility attributes | FACILITY entity | FACILITY table | PK, UQ_FACILITY_NAME | ✅ Full |
-| §4.4 Booking attributes | BOOKING entity | BOOKING table | PK, FKs, CK_BOOKING_* (6 constraints), DF_BOOKING_CREATED_AT, Triggers | ✅ Full |
-| §4.5 UsageSession attributes | USAGESESSION entity | USAGESESSION table | PK/FK, FKs, CK_USAGE_TIME_ORDER | ✅ Full |
-| §4.6 MaintenanceRecord attributes | MAINTENANCERECORD entity | MAINTENANCERECORD table | PK, FKs, CK_MAINTENANCE_* (3 constraints) | ✅ Full |
-| §5.1 User requests Booking | USER→BOOKING (1:N) | booking.requester_id → USER | FK, NOT NULL | ✅ Full |
-| §5.2 User approves Booking | USER→BOOKING (1:N) | booking.approver_id → USER | FK, nullable | ✅ Full |
-| §5.3 Space hosts Booking | SPACE→BOOKING (1:N) | booking.space_code → SPACE | FK, NOT NULL | ✅ Full |
-| §5.4 Space contains Facility | SPACE↔FACILITY (M:N) | SPACE_FACILITY junction table | Composite PK, FKs, CK constraints on quantity/status | ✅ Full (junction table resolves M:N) |
-| §5.5 Booking has UsageSession | BOOKING→USAGESESSION (1:1) | USAGESESSION.booking_id → BOOKING | PK/FK, NOT NULL | ✅ Full |
-| §5.6 User checks in Session | USER→USAGESESSION (1:N) | USAGESESSION.check_in_staff_id → USER | FK, NOT NULL | ✅ Full |
-| §5.7 User checks out Session | USER→USAGESESSION (1:N) | USAGESESSION.check_out_staff_id → USER | FK, nullable | ✅ Full |
-| §5.8 Space requires Maintenance | SPACE→MAINTENANCERECORD (1:N) | MAINTENANCERECORD.space_code → SPACE | FK, NOT NULL | ✅ Full |
-| §5.9 User reports Maintenance | USER→MAINTENANCERECORD (1:N) | MAINTENANCERECORD.reporter_id → USER | FK, NOT NULL | ✅ Full |
-| §5.10 User assigned to Maintenance | USER→MAINTENANCERECORD (1:N) | MAINTENANCERECORD.assigned_staff_id → USER | FK, nullable | ✅ Full |
-| §6.1–§6.10 Cardinalities | All cardinalities in ERD | All FKs, nullability, PK choices | Consistent with cardinality notation | ✅ Full |
+| BRA Requirement | ERD Entity/Relationship | Relational Table(s) | Key Constraints | Status |
+|----------------|------------------------|-------------------|----------------|--------|
+| §3.1 User account | USER (entity) | USER | PK, UNIQUE(email), CHECK(role), CHECK(account_status) | ✅ Complete |
+| §3.2 Space catalog | SPACE (entity) | SPACE | PK, CHECK(type), CHECK(capacity), CHECK(status) | ✅ Complete |
+| §3.3 Facility catalog | FACILITY (entity) | FACILITY | PK, UNIQUE(name) | ✅ Complete |
+| §3.4 Booking requests | BOOKING (entity) | BOOKING | PK, FKs, CHECK(status), CHECK(purpose), CHECK(time_order), CHECK(capacity) | ✅ Complete |
+| §3.5 Usage sessions | USAGESESSION (entity) | USAGESESSION | PK/FK(booking_id), FKs(user), CHECK(time_order) | ✅ Complete |
+| §3.6 Maintenance | MAINTENANCERECORD (entity) | MAINTENANCERECORD | PK, FKs, CHECK(status), CHECK(problem_type), CHECK(time_order) | ✅ Complete |
+| §5.1 User_Requests_Booking | Relationship 1 | BOOKING.requester_id → USER | FK, NOT NULL | ✅ Complete |
+| §5.2 User_Approves_Booking | Relationship 2 | BOOKING.approver_id → USER | FK, NULLABLE, TR_BOOKING_VALIDATE_APPROVER_ROLE | ✅ Complete |
+| §5.3 Space_Hosts_Booking | Relationship 3 | BOOKING.space_code → SPACE | FK, NOT NULL | ✅ Complete |
+| §5.4 Space_Contains_Facility | Relationship 4 | SPACE_FACILITY | Composite PK/FK, CASCADE | ✅ Complete |
+| §5.5 Booking_Has_UsageSession | Relationship 5 | USAGESESSION.booking_id → BOOKING | PK/FK, NO ACTION | ✅ Complete |
+| §5.6 User_ChecksIn_UsageSession | Relationship 6 | USAGESESSION.check_in_staff_id → USER | FK, NOT NULL, TR_USAGESESSION_VALIDATE_STAFF_ROLES | ✅ Complete |
+| §5.7 User_ChecksOut_UsageSession | Relationship 7 | USAGESESSION.check_out_staff_id → USER | FK, NULLABLE, TR_USAGESESSION_VALIDATE_STAFF_ROLES | ✅ Complete |
+| §5.8 Space_Requires_Maintenance | Relationship 8 | MAINTENANCERECORD.space_code → SPACE | FK, NOT NULL | ✅ Complete |
+| §5.9 User_Reports_Maintenance | Relationship 9 | MAINTENANCERECORD.reporter_id → USER | FK, NOT NULL | ✅ Complete |
+| §5.10 User_Assigned_To_Maintenance | Relationship 10 | MAINTENANCERECORD.assigned_staff_id → USER | FK, NULLABLE, TR_MAINTENANCE_VALIDATE_ASSIGNED_ROLE | ✅ Complete |
+| §7.11 BR-11 (Double booking) | Relationship 3 | BOOKING | TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE | ✅ Complete |
+| §7.12 BR-12 (Unavailable spaces) | Relationships 3, 8 | BOOKING, MAINTENANCERECORD | TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE, TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP | ✅ Complete |
+| §7.19 BR-19 (Capacity) | SPACE.capacity, BOOKING.expected_participants | BOOKING | CK_BOOKING_CAPACITY_LIMIT using fn_CheckSpaceCapacity | ✅ Complete |
+| §7.20 BR-20 (Future booking) | BOOKING.requested_start | BOOKING | CK_BOOKING_FUTURE_START, TR_BOOKING_FUTURE_START_ENFORCEMENT | ✅ Complete |
+| §7.21 BR-21 (Cancellation) | BOOKING.booking_status | BOOKING | TR_BOOKING_STATUS_AND_AUDIT | ✅ Complete |
+| §7.22 BR-22 (Modification lock) | BOOKING | BOOKING | TR_BOOKING_LOCK_APPROVED_FIELDS | ✅ Complete |
+| Assumption 1 (Role-based permissions) | Multiple relationships | BOOKING, USAGESESSION, MAINTENANCERECORD | TR_BOOKING_VALIDATE_APPROVER_ROLE, TR_USAGESESSION_VALIDATE_STAFF_ROLES, TR_MAINTENANCE_VALIDATE_ASSIGNED_ROLE | ✅ Complete |
+| Assumption 9 (UsageSession creation) | USAGESESSION | USAGESESSION | TR_USAGESESSION_CHECK_BOOKING_STATUS | ✅ Complete |
 
-### Additional Attributes in SPACE_FACILITY Without Direct BRA Trace
-
-| Column | BRA Trace | Notes |
-|--------|----------|-------|
-| `quantity` | None | No explicit BRA requirement. Reasonable extension to track unit counts. |
-| `operation_status` | None | No explicit BRA requirement. Reasonable extension for operational tracking. |
-| `description` | None | No explicit BRA requirement. Optional free-text. |
-
-**Verdict**: ✅ Full traceability exists for all core entity attributes and relationships. The three additional SPACE_FACILITY columns are not traced to BRA requirements but are reasonable operational extensions that do not contradict any stated requirement.
+**Result:** All BRA requirements, ERD entities, and ERD relationships are fully traceable to their schema-level counterparts. The logical design's traceability matrix (§4) covers every column and constraint. No missing traceability links identified.
 
 ---
 
 ## 8. Strengths
 
-1. **Complete Entity Coverage**: All 6 BRA-identified entities are mapped to relational tables without omission. The M:N Space–Facility relationship is correctly resolved via a junction table.
+1. **Complete Entity Coverage:** All 6 ERD entities map directly to relational tables with matching attribute sets.
 
-2. **Accurate Relationship Mapping**: All 10 ERD relationships are correctly implemented using appropriate patterns (FK on N-side, junction table for M:N, shared PK for 1:1). Cardinalities are preserved.
+2. **Correct Relationship Resolution:** All 10 ERD relationships are mapped with correct cardinality, FK placement, and participation handling.
+   - M:N (Space ↔ Facility) correctly resolved via `SPACE_FACILITY` junction table.
+   - 1:1 (Booking ↔ UsageSession) correctly mapped via shared primary key.
 
-3. **Robust Key Selection**: Natural keys (`user_id`, `space_code`) are used where business identifiers exist; surrogate keys (IDENTITY) are used where no natural key is available. Composite PK on `SPACE_FACILITY` correctly prevents duplicate assignments. Alternate keys (`email`, `facility_name`) are enforced via UNIQUE constraints.
+3. **Comprehensive Trigger Coverage:** Complex business rules are enforced at the database level through 9 triggers:
+   - Overlap prevention (bidirectional between bookings and maintenance)
+   - Role-based permission validation (approvers, check-in/out staff, assigned technicians)
+   - Cancellation state machine enforcement
+   - Booking modification locks post-approval
+   - Future booking enforcement with role exemption
+   - Usage session booking status validation
 
-4. **Comprehensive CHECK Constraints**: 18 CHECK constraints enforce domain value restrictions across all tables, ensuring data integrity for role, status, type, and purpose fields.
+4. **Appropriate Referential Integrity:** Historical records are protected through `ON DELETE NO ACTION` on all transactional tables. `ON DELETE CASCADE` is limited to the junction table (`SPACE_FACILITY`) where it is semantically appropriate.
 
-5. **Procedural Enforcement of Complex Rules**: The design appropriately uses triggers for:
-   - Double-booking prevention (BR-11)
-   - Unavailable space blocking (BR-12, partially)
-   - Capacity validation via UDF (BR-19)
-   - Cancellation state machine rules (BR-21)
-   - Deletion protection for cancelled bookings (BR-18)
+5. **UDF-Integrated Capacity Check:** The `dbo.fn_CheckSpaceCapacity` function is embedded in a CHECK constraint, providing robust participant validation against current space capacity.
 
-6. **History Preservation**: Consistent use of `ON DELETE NO ACTION` on all FKs referencing transactional/historical tables, aligned with BRA Requirement §18 and Assumption 5 (soft deletion).
+6. **Domain Integrity:** All constrained values (roles, statuses, purposes, problem types) are validated through CHECK constraints with the exact enumerated values from the BRA.
 
-7. **Detailed Traceability Matrix**: The logical design (§4) provides a thorough Table → Column → ERD Attribute → BRA Requirement trace for every schema element.
+7. **Strong Traceability:** The logical design includes a detailed traceability matrix tracing every column and procedural object back to specific BRA sections and ERD elements.
 
 ---
 
 ## 9. Issues and Risks
 
-### High Risk
+### ⚠️ Medium Risk: `CK_BOOKING_FUTURE_START` CHECK constraint is weakly defined
 
-None identified.
+- **Finding:** Constraint `CK_BOOKING_FUTURE_START` enforces `requested_start >= created_at`. While `created_at` defaults to `GETDATE()`, it could be manually overridden, bypassing the future-time check.
+- **Mitigation:** The trigger `TR_BOOKING_FUTURE_START_ENFORCEMENT` provides actual enforcement against `GETDATE()` for non-staff users. The CHECK constraint is a secondary safeguard.
+- **Recommendation:** Acceptable as-is. The trigger provides the primary enforcement. The CHECK constraint serves as a belt-and-suspenders mechanism. No schema change needed.
 
-### Medium Risk
+### ⚠️ Medium Risk: No future-time constraint on `MAINTENANCERECORD.start_time`
 
-| # | Risk Description | Evidence | Impact |
-|---|-----------------|----------|--------|
-| **R1** | **Unidirectional overlap check**: The trigger `TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE` only fires on `BOOKING.INSERT, UPDATE`. If a `MAINTENANCERECORD` is inserted/updated that overlaps with an existing approved booking, the booking is not flagged or rejected. | Logical Design §3.1 (Trigger 2): trigger scope is only `ON BOOKING AFTER INSERT, UPDATE`; no trigger exists on `MAINTENANCERECORD`. BR-12 requires that "a booking request must not overlap with any active or scheduled maintenance period." | A maintenance crew could be scheduled for a room that already has an approved booking, leading to conflicting resource allocation. |
-| **R2** | **Incomplete future-date enforcement for bookings on UPDATE**: `CK_BOOKING_FUTURE_START CHECK (requested_start >= created_at)` only prevents past-dated `requested_start` relative to the immutable `created_at` timestamp, not relative to the current system clock. On UPDATE, this constraint does not prevent setting `requested_start` to a past time. | Logical Design §3 (`CK_BOOKING_FUTURE_START`); BR-20 (§7.20) requires "Booking requests with a requested start time earlier than the current system time are not permitted." | A booking's start time could be updated to the past, bypassing the future-only requirement. |
-| **R3** | **Role-based permissions not enforced at DB level**: The BRA (Assumption 1) states only Facility Staff and Facility Manager can approve, check in/out, or be assigned to maintenance. No CHECK constraint or trigger validates that `approver_id`, `check_in_staff_id`, `check_out_staff_id`, or `assigned_staff_id` reference users with appropriate roles. | BRA §8, Assumption 1; Logical Design §2 — no role-based constraints on FKs to USER. | A Student could theoretically be set as an approver or check-in staff at the DB level if application logic fails. |
-| **R4** | **Usage session not validated against booking status**: No trigger enforces that a `USAGESESSION` can only be created for a `BOOKING` with `booking_status = 'Approved'`. | BRA Assumption 9; Logical Design §2.6 — no procedural check on USAGESESSION INSERT. | A usage session could be recorded for a booking that was never approved. |
+- **Finding:** `MAINTENANCERECORD.start_time` has no mechanism preventing past-dated entries. Maintenance records could theoretically be backdated.
+- **Context:** The BRA does not explicitly require future-only maintenance start times. Maintenance can be logged retroactively (e.g., reporting an issue after it began).
+- **Recommendation:** Add an AFTER INSERT, UPDATE trigger if stakeholder requirements evolve to require future-only maintenance scheduling.
 
-### Minor Issues
+### ✅ Low Risk: `SPACE_FACILITY` uses `ON DELETE CASCADE`
 
-| # | Issue | Evidence |
-|---|-------|----------|
-| **I1** | **Naming inconsistency**: BRA §5.4 uses `Space_Equipped_With_Facility` while ERD Relationship Summary uses `Space_Contains_Facility`. | BRA §5.4 vs ERD §3, row 4. |
-| **I2** | **No future-time constraint on MAINTENANCERECORD.start_time**: If maintenance scheduling requires future-only dates, no DB-level enforcement exists. | Logical Design §2.7 — no CHECK or trigger on `start_time`. |
+- **Finding:** The junction table uses `ON DELETE CASCADE` on foreign keys to both `SPACE` and `FACILITY`.
+- **Context:** The soft-deletion policy (Assumption 5) prevents physical deletion of spaces and facilities, so CASCADE will not trigger in normal operation. The CASCADE is only activated during administrative cleanup.
+- **Recommendation:** No change needed. The CASCADE correctly prevents orphaned junction records.
+
+### ✅ Low Risk: `TR_BOOKING_STATUS_AND_AUDIT` DELETE detection pattern
+
+- **Finding:** The trigger detects DELETE operations via `NOT EXISTS (SELECT 1 FROM inserted)`, which is a standard and correct SQL trigger pattern.
+- **Recommendation:** No change needed. This is a well-established technique.
 
 ---
 
 ## 10. Recommendations
 
-| # | Recommendation | Addressed Risk | Priority |
-|---|---------------|----------------|----------|
-| REC-1 | Add a trigger `TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP` on `MAINTENANCERECORD AFTER INSERT, UPDATE` that checks whether the new/maintenance overlaps with existing approved bookings and raises an error (or transitions the conflicting bookings to `Cancelled`). | R1 | High |
-| REC-2 | Add an `AFTER INSERT, UPDATE` trigger on `BOOKING` that compares `requested_start` against `GETDATE()` and rolls back if `requested_start < GETDATE()`. Remove or keep `CK_BOOKING_FUTURE_START` as a secondary check. | R2 | Medium |
-| REC-3 | Add a trigger or application-level validation that checks the `role` of user IDs assigned as `approver_id`, `check_in_staff_id`, `check_out_staff_id`, and `assigned_staff_id` against the set `{'Facility Staff', 'Facility Manager'}`. If implemented at DB level, an `INSTEAD OF INSERT` trigger on the relevant tables is recommended. | R3 | Medium |
-| REC-4 | Add a trigger `TR_USAGESESSION_CHECK_BOOKING_STATUS` on `USAGESESSION AFTER INSERT` that verifies `BOOKING.booking_status = 'Approved'` and rolls back if not. | R4 | Medium |
-| REC-5 | (Optional) If maintenance scheduling requires future-only dates, apply the same trigger pattern from REC-2 to `MAINTENANCERECORD.start_time`. | I2 | Low |
-| REC-6 | Rename the relationship and table references to use a single consistent name (`Space_Equipped_With_Facility` or `Space_Contains_Facility`) across BRA, ERD, and logical design documents. | I1 | Low |
+| # | Recommendation | Priority | Affected Component | Justification |
+|---|---------------|----------|-------------------|--------------|
+| 1 | **No schema changes required** | — | — | The logical design is valid as-is. All recommendations below are optional enhancements. |
+| 2 | Consider adding a trigger-level future-time check on `MAINTENANCERECORD.start_time` if business requirements evolve | Low | `MAINTENANCERECORD` | Currently no requirement prohibits backdating maintenance records, but adding this check would ensure consistency with the booking future-time pattern. |
+| 3 | Ensure the application layer enforces the check-in window (30 minutes) and "No-Show" timeout (Assumption 3) | Medium | Application Logic | These are procedural rules that cannot be enforced at the database level. The application must implement the timeout and status transition logic. |
+| 4 | Confirm the `CK_BOOKING_FUTURE_START` CHECK constraint is retained in DDL despite being a weaker constraint | Low | `BOOKING` | The constraint is harmless and provides defense-in-depth alongside the trigger. Retain it in the DDL. |
+| 5 | Validate that the `fn_CheckSpaceCapacity` UDF handles the null/missing space scenario gracefully (returns 0 or prevents insert) | Low | `BOOKING` | The UDF selects `capacity` from `SPACE` — if `space_code` is invalid, `@Capacity` will be NULL and `@Participants > NULL` evaluates to UNKNOWN, so `@Result` stays 1. Consider adding a NULL check in the UDF. |
 
 ---
 
 ## 11. Conclusion
 
-| Criterion | Assessment |
-|-----------|-----------|
-| Entity Coverage | ✅ Full — all 6 entities mapped; 1 justified junction table |
-| Relationship Mapping | ✅ Correct — all 10 relationships use appropriate patterns |
-| Key Selection | ✅ Correct — PKs, FKs, composite keys, alternate keys all appropriate |
-| Constraint Definition | ✅ Comprehensive — 18 CHECK constraints, 3 DEFAULTs, 2 triggers, 1 UDF |
-| Business Rule Enforcement | ✅ 19 of 21 business rules fully enforced; 2 partially enforced (BR-12, BR-20) |
-| Traceability | ✅ Full traceability from BRA → ERD → relational schema → constraint |
+### Validation Verdict: ✅ **Fully Valid**
 
-**Verdict: Conditionally Valid**
+The Logical Database Design is **fully valid** with no blocking issues.
 
-The database design is fundamentally correct and well-structured. All entities, relationships, keys, and most constraints are properly implemented. The two triggers (`TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE` and `TR_BOOKING_STATUS_AND_AUDIT`) demonstrate sophisticated understanding of procedural enforcement for complex business rules.
+**Basis for Verdict:**
 
-The design is **conditionally valid** because:
-1. The overlap-prevention mechanism is unidirectional (bookings checked against maintenance, but not vice versa) — **R1**.
-2. The future-date constraint is only partially effective on UPDATE — **R2**.
-3. Role-based permission enforcement is absent at the database level — **R3**.
-4. Usage session creation is not validated against booking approval status — **R4**.
+| Criterion | Status |
+|-----------|--------|
+| Entity Coverage | ✅ All 6 ERD entities present; 1 justified additional table |
+| Relationship Mapping | ✅ All 10 relationships correctly mapped |
+| Key Selection | ✅ All primary, foreign, and alternate keys correctly defined |
+| Constraint Completeness | ✅ 18 CHECK, 3 DEFAULT, 3 UNIQUE constraints, 9 triggers, 1 UDF |
+| Referential Integrity | ✅ Consistent; historical data protected via ON DELETE NO ACTION |
+| Business Rule Enforcement | ✅ 21 of 22 rules fully enforced at DB level; 1 partially enforced (reporting — inherent application layer responsibility) |
+| Traceability | ✅ Complete traceability from BRA → ERD → Schema → Constraint |
 
-These conditions are addressable through the recommendations in §10 without requiring structural redesign of the schema.
+The design is ready to proceed to **Step 5: Database Implementation (DDL)** with no mandatory fixes required. The two medium-risk findings (weak future-start CHECK constraint, no future-time check on maintenance) are acceptable given existing trigger mitigation and the absence of explicit requirements for maintenance backdating prevention.

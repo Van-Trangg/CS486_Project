@@ -19,11 +19,18 @@ GO
 -- ============================================================
 -- Cleanup Section
 -- ============================================================
+DROP TRIGGER IF EXISTS TR_BOOKING_LOCK_APPROVED_FIELDS;
+DROP TRIGGER IF EXISTS TR_USAGESESSION_CHECK_BOOKING_STATUS;
+DROP TRIGGER IF EXISTS TR_MAINTENANCE_VALIDATE_ASSIGNED_ROLE;
+DROP TRIGGER IF EXISTS TR_USAGESESSION_VALIDATE_STAFF_ROLES;
+DROP TRIGGER IF EXISTS TR_BOOKING_VALIDATE_APPROVER_ROLE;
+DROP TRIGGER IF EXISTS TR_BOOKING_FUTURE_START_ENFORCEMENT;
+DROP TRIGGER IF EXISTS TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP;
 DROP TRIGGER IF EXISTS TR_BOOKING_STATUS_AND_AUDIT;
 DROP TRIGGER IF EXISTS TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE;
+DROP TABLE IF EXISTS MAINTENANCERECORD;
 DROP TABLE IF EXISTS USAGESESSION;
 DROP TABLE IF EXISTS BOOKING;
-DROP TABLE IF EXISTS MAINTENANCERECORD;
 DROP TABLE IF EXISTS SPACE_FACILITY;
 DROP TABLE IF EXISTS FACILITY;
 DROP TABLE IF EXISTS SPACE;
@@ -32,7 +39,7 @@ DROP FUNCTION IF EXISTS dbo.fn_CheckSpaceCapacity;
 GO
 
 -- ============================================================
--- Table: [USER]
+-- Table: USER
 -- ============================================================
 CREATE TABLE [USER] (
     user_id VARCHAR(50) NOT NULL,
@@ -43,14 +50,14 @@ CREATE TABLE [USER] (
     department VARCHAR(100) NOT NULL,
     account_status VARCHAR(20) NOT NULL,
 
-    CONSTRAINT PK_USER PRIMARY KEY (user_id),
-    CONSTRAINT UQ_USER_EMAIL UNIQUE (email),
-    CONSTRAINT CK_USER_ROLE CHECK (
-        role IN ('Student', 'Lecturer', 'Teaching Assistant', 'Facility Staff', 'Department Administrator', 'Facility Manager')
-    ),
-    CONSTRAINT CK_USER_ACCOUNT_STATUS CHECK (
-        account_status IN ('Active', 'Suspended', 'Inactive')
-    )
+    CONSTRAINT PK_USER
+        PRIMARY KEY (user_id),
+    CONSTRAINT UQ_USER_EMAIL
+        UNIQUE (email),
+    CONSTRAINT CK_USER_ROLE
+        CHECK (role IN ('Student', 'Lecturer', 'Teaching Assistant', 'Facility Staff', 'Department Administrator', 'Facility Manager')),
+    CONSTRAINT CK_USER_ACCOUNT_STATUS
+        CHECK (account_status IN ('Active', 'Suspended', 'Inactive'))
 );
 GO
 
@@ -68,14 +75,14 @@ CREATE TABLE SPACE (
     current_status VARCHAR(20) NOT NULL,
     usage_policy NVARCHAR(MAX) NOT NULL,
 
-    CONSTRAINT PK_SPACE PRIMARY KEY (space_code),
-    CONSTRAINT CK_SPACE_TYPE CHECK (
-        space_type IN ('Auditorium', 'Classroom', 'Computer Laboratory', 'Project Laboratory', 'Meeting Room', 'Student Workspace')
-    ),
-    CONSTRAINT CK_SPACE_CAPACITY CHECK (capacity > 0),
-    CONSTRAINT CK_SPACE_CURRENT_STATUS CHECK (
-        current_status IN ('Available', 'In Use', 'Under Maintenance', 'Temporarily Closed', 'Retired')
-    )
+    CONSTRAINT PK_SPACE
+        PRIMARY KEY (space_code),
+    CONSTRAINT CK_SPACE_TYPE
+        CHECK (space_type IN ('Auditorium', 'Classroom', 'Computer Laboratory', 'Project Laboratory', 'Meeting Room', 'Student Workspace')),
+    CONSTRAINT CK_SPACE_CAPACITY
+        CHECK (capacity > 0),
+    CONSTRAINT CK_SPACE_CURRENT_STATUS
+        CHECK (current_status IN ('Available', 'In Use', 'Under Maintenance', 'Temporarily Closed', 'Retired'))
 );
 GO
 
@@ -87,14 +94,40 @@ CREATE TABLE FACILITY (
     facility_name VARCHAR(100) NOT NULL,
     facility_description NVARCHAR(MAX) NULL,
 
-    CONSTRAINT PK_FACILITY PRIMARY KEY (facility_id),
-    CONSTRAINT UQ_FACILITY_NAME UNIQUE (facility_name)
+    CONSTRAINT PK_FACILITY
+        PRIMARY KEY (facility_id),
+    CONSTRAINT UQ_FACILITY_NAME
+        UNIQUE (facility_name)
+);
+GO
+
+-- ============================================================
+-- Table: SPACE_FACILITY
+-- ============================================================
+CREATE TABLE SPACE_FACILITY (
+    space_code VARCHAR(50) NOT NULL,
+    facility_id INT NOT NULL,
+    quantity INT NOT NULL CONSTRAINT DF_SPACE_FACILITY_QUANTITY DEFAULT 1,
+    operation_status VARCHAR(30) NOT NULL CONSTRAINT DF_SPACE_FACILITY_STATUS DEFAULT 'Operational',
+    description NVARCHAR(500) NULL,
+
+    CONSTRAINT PK_SPACE_FACILITY
+        PRIMARY KEY (space_code, facility_id),
+    CONSTRAINT FK_SPACE_FACILITY_SPACE
+        FOREIGN KEY (space_code) REFERENCES SPACE(space_code) ON DELETE CASCADE ON UPDATE NO ACTION,
+    CONSTRAINT FK_SPACE_FACILITY_FACILITY
+        FOREIGN KEY (facility_id) REFERENCES FACILITY(facility_id) ON DELETE CASCADE ON UPDATE NO ACTION,
+    CONSTRAINT CK_SPACE_FACILITY_QUANTITY
+        CHECK (quantity > 0),
+    CONSTRAINT CK_SPACE_FACILITY_STATUS
+        CHECK (operation_status IN ('Operational', 'Partially Operational', 'Broken'))
 );
 GO
 
 -- ============================================================
 -- Function: dbo.fn_CheckSpaceCapacity
--- Validates that expected participants do not exceed capacity.
+-- Validates expected participants do not exceed space capacity.
+-- Referenced by CK_BOOKING_CAPACITY_LIMIT CHECK constraint (BR-19).
 -- ============================================================
 CREATE FUNCTION dbo.fn_CheckSpaceCapacity (@SpaceCode VARCHAR(50), @Participants INT)
 RETURNS BIT
@@ -110,28 +143,6 @@ BEGIN
 
     RETURN @Result;
 END;
-GO
-
--- ============================================================
--- Table: SPACE_FACILITY
--- ============================================================
-CREATE TABLE SPACE_FACILITY (
-    space_code VARCHAR(50) NOT NULL,
-    facility_id INT NOT NULL,
-    quantity INT NOT NULL CONSTRAINT DF_SPACE_FACILITY_QUANTITY DEFAULT 1,
-    operation_status VARCHAR(30) NOT NULL CONSTRAINT DF_SPACE_FACILITY_STATUS DEFAULT 'Operational',
-    description NVARCHAR(500) NULL,
-
-    CONSTRAINT PK_SPACE_FACILITY PRIMARY KEY (space_code, facility_id),
-    CONSTRAINT CK_SPACE_FACILITY_QUANTITY CHECK (quantity > 0),
-    CONSTRAINT CK_SPACE_FACILITY_STATUS CHECK (
-        operation_status IN ('Operational', 'Partially Operational', 'Broken')
-    ),
-    CONSTRAINT FK_SPACE_FACILITY_SPACE FOREIGN KEY (space_code)
-        REFERENCES SPACE(space_code) ON DELETE CASCADE,
-    CONSTRAINT FK_SPACE_FACILITY_FACILITY FOREIGN KEY (facility_id)
-        REFERENCES FACILITY(facility_id) ON DELETE CASCADE
-);
 GO
 
 -- ============================================================
@@ -152,24 +163,28 @@ CREATE TABLE BOOKING (
     decision_note NVARCHAR(MAX) NULL,
     rejection_reason VARCHAR(255) NULL,
 
-    CONSTRAINT PK_BOOKING PRIMARY KEY (booking_id),
-    CONSTRAINT CK_BOOKING_TIME_ORDER CHECK (requested_end > requested_start),
-    CONSTRAINT CK_BOOKING_PARTICIPANTS CHECK (expected_participants > 0),
-    CONSTRAINT CK_BOOKING_PURPOSE CHECK (
-        purpose IN ('Lecture', 'Examination', 'Seminar', 'Workshop', 'Meeting', 'Student Activity', 'Administrative Event')
-    ),
-    CONSTRAINT CK_BOOKING_STATUS CHECK (
-        booking_status IN ('Pending', 'Approved', 'Rejected', 'Cancelled', 'Checked In', 'Completed', 'No-Show')
-    ),
-    CONSTRAINT CK_BOOKING_FUTURE_START CHECK (requested_start >= created_at),
-    CONSTRAINT CK_BOOKING_REJECTION_REASON CHECK (booking_status <> 'Rejected' OR rejection_reason IS NOT NULL),
-    CONSTRAINT CK_BOOKING_CAPACITY_LIMIT CHECK (dbo.fn_CheckSpaceCapacity(space_code, expected_participants) = 1),
-    CONSTRAINT FK_BOOKING_SPACE FOREIGN KEY (space_code)
-        REFERENCES SPACE(space_code) ON DELETE NO ACTION ON UPDATE NO ACTION,
-    CONSTRAINT FK_BOOKING_USER_REQUESTER FOREIGN KEY (requester_id)
-        REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
-    CONSTRAINT FK_BOOKING_USER_APPROVER FOREIGN KEY (approver_id)
-        REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION
+    CONSTRAINT PK_BOOKING
+        PRIMARY KEY (booking_id),
+    CONSTRAINT FK_BOOKING_SPACE
+        FOREIGN KEY (space_code) REFERENCES SPACE(space_code) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT FK_BOOKING_USER_REQUESTER
+        FOREIGN KEY (requester_id) REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT FK_BOOKING_USER_APPROVER
+        FOREIGN KEY (approver_id) REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT CK_BOOKING_TIME_ORDER
+        CHECK (requested_end > requested_start),
+    CONSTRAINT CK_BOOKING_PARTICIPANTS
+        CHECK (expected_participants > 0),
+    CONSTRAINT CK_BOOKING_PURPOSE
+        CHECK (purpose IN ('Lecture', 'Examination', 'Seminar', 'Workshop', 'Meeting', 'Student Activity', 'Administrative Event')),
+    CONSTRAINT CK_BOOKING_STATUS
+        CHECK (booking_status IN ('Pending', 'Approved', 'Rejected', 'Cancelled', 'Checked In', 'Completed', 'No-Show')),
+    CONSTRAINT CK_BOOKING_FUTURE_START
+        CHECK (requested_start >= created_at),
+    CONSTRAINT CK_BOOKING_REJECTION_REASON
+        CHECK (booking_status <> 'Rejected' OR rejection_reason IS NOT NULL),
+    CONSTRAINT CK_BOOKING_CAPACITY_LIMIT
+        CHECK (dbo.fn_CheckSpaceCapacity(space_code, expected_participants) = 1)
 );
 GO
 
@@ -186,14 +201,16 @@ CREATE TABLE USAGESESSION (
     final_condition NVARCHAR(MAX) NULL,
     usage_notes NVARCHAR(MAX) NULL,
 
-    CONSTRAINT PK_USAGESESSION PRIMARY KEY (booking_id),
-    CONSTRAINT CK_USAGE_TIME_ORDER CHECK (actual_end > actual_start),
-    CONSTRAINT FK_USAGESESSION_BOOKING FOREIGN KEY (booking_id)
-        REFERENCES BOOKING(booking_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
-    CONSTRAINT FK_USAGESESSION_USER_CHECKIN FOREIGN KEY (check_in_staff_id)
-        REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
-    CONSTRAINT FK_USAGESESSION_USER_CHECKOUT FOREIGN KEY (check_out_staff_id)
-        REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION
+    CONSTRAINT PK_USAGESESSION
+        PRIMARY KEY (booking_id),
+    CONSTRAINT FK_USAGESESSION_BOOKING
+        FOREIGN KEY (booking_id) REFERENCES BOOKING(booking_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT FK_USAGESESSION_USER_CHECKIN
+        FOREIGN KEY (check_in_staff_id) REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT FK_USAGESESSION_USER_CHECKOUT
+        FOREIGN KEY (check_out_staff_id) REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT CK_USAGE_TIME_ORDER
+        CHECK (actual_end > actual_start)
 );
 GO
 
@@ -212,27 +229,27 @@ CREATE TABLE MAINTENANCERECORD (
     maintenance_status VARCHAR(20) NOT NULL,
     result_note NVARCHAR(MAX) NULL,
 
-    CONSTRAINT PK_MAINTENANCERECORD PRIMARY KEY (maintenance_id),
-    CONSTRAINT CK_MAINTENANCE_TIME_ORDER CHECK (completion_time > start_time),
-    CONSTRAINT CK_MAINTENANCE_STATUS CHECK (
-        maintenance_status IN ('Reported', 'In Progress', 'Resolved', 'Cancelled')
-    ),
-    CONSTRAINT CK_MAINTENANCE_PROBLEM_TYPE CHECK (
-        problem_type IN ('Projector Failure', 'Air-Conditioning Issue', 'Cleaning Issue', 'Furniture Damage', 'Network Issue', 'Other')
-    ),
-    CONSTRAINT FK_MAINTENANCERECORD_SPACE FOREIGN KEY (space_code)
-        REFERENCES SPACE(space_code) ON DELETE NO ACTION ON UPDATE NO ACTION,
-    CONSTRAINT FK_MAINTENANCERECORD_USER_REPORTER FOREIGN KEY (reporter_id)
-        REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
-    CONSTRAINT FK_MAINTENANCERECORD_USER_ASSIGNED FOREIGN KEY (assigned_staff_id)
-        REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION
+    CONSTRAINT PK_MAINTENANCERECORD
+        PRIMARY KEY (maintenance_id),
+    CONSTRAINT FK_MAINTENANCERECORD_SPACE
+        FOREIGN KEY (space_code) REFERENCES SPACE(space_code) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT FK_MAINTENANCERECORD_USER_REPORTER
+        FOREIGN KEY (reporter_id) REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT FK_MAINTENANCERECORD_USER_ASSIGNED
+        FOREIGN KEY (assigned_staff_id) REFERENCES [USER](user_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
+    CONSTRAINT CK_MAINTENANCE_TIME_ORDER
+        CHECK (completion_time > start_time),
+    CONSTRAINT CK_MAINTENANCE_STATUS
+        CHECK (maintenance_status IN ('Reported', 'In Progress', 'Resolved', 'Cancelled')),
+    CONSTRAINT CK_MAINTENANCE_PROBLEM_TYPE
+        CHECK (problem_type IN ('Projector Failure', 'Air-Conditioning Issue', 'Cleaning Issue', 'Furniture Damage', 'Network Issue', 'Other'))
 );
 GO
 
 -- ============================================================
 -- Trigger: TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE
 -- Prevents double booking, scheduling during maintenance,
--- and booking of retired/closed spaces.
+-- and booking of retired/closed spaces (BR-11, BR-12).
 -- ============================================================
 CREATE TRIGGER TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE
 ON BOOKING
@@ -272,8 +289,8 @@ GO
 
 -- ============================================================
 -- Trigger: TR_BOOKING_STATUS_AND_AUDIT
--- Enforces cancellation state machine rules (BR-21).
--- Prevents deletion of cancelled bookings.
+-- Enforces cancellation state transitions and prevents
+-- deletion of cancelled bookings (BR-21).
 -- ============================================================
 CREATE TRIGGER TR_BOOKING_STATUS_AND_AUDIT
 ON BOOKING
@@ -307,6 +324,202 @@ BEGIN
         RAISERROR ('Cancelled bookings must remain stored in the system to preserve historical records and auditability.', 16, 1);
         ROLLBACK TRANSACTION;
         RETURN;
+    END
+END;
+GO
+
+-- ============================================================
+-- Trigger: TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP
+-- Bidirectional overlap check: prevents maintenance from
+-- conflicting with approved bookings (BR-12, REC-1).
+-- ============================================================
+CREATE TRIGGER TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP
+ON MAINTENANCERECORD
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN BOOKING b ON b.space_code = i.space_code
+        WHERE i.maintenance_status IN ('Reported', 'In Progress')
+          AND b.booking_status = 'Approved'
+          AND b.requested_start < ISNULL(i.completion_time, '9999-12-31')
+          AND b.requested_end > i.start_time
+    )
+    BEGIN
+        RAISERROR ('Maintenance record conflicts with an existing approved booking for the same space and time period.', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+END;
+GO
+
+-- ============================================================
+-- Trigger: TR_BOOKING_FUTURE_START_ENFORCEMENT
+-- Enforces future-only booking start with role exemption
+-- for Facility Staff and Facility Manager (BR-20, REC-2).
+-- ============================================================
+CREATE TRIGGER TR_BOOKING_FUTURE_START_ENFORCEMENT
+ON BOOKING
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN [USER] u ON i.requester_id = u.user_id
+        WHERE i.requested_start < GETDATE()
+          AND u.role NOT IN ('Facility Staff', 'Facility Manager')
+    )
+    BEGIN
+        RAISERROR ('Non-staff users may only submit booking requests for future time periods.', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+END;
+GO
+
+-- ============================================================
+-- Trigger: TR_BOOKING_VALIDATE_APPROVER_ROLE
+-- Validates that the approver has Facility Staff or
+-- Facility Manager role (Assumption 1, REC-3).
+-- ============================================================
+CREATE TRIGGER TR_BOOKING_VALIDATE_APPROVER_ROLE
+ON BOOKING
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN [USER] u ON i.approver_id = u.user_id
+        WHERE u.role NOT IN ('Facility Staff', 'Facility Manager')
+    )
+    BEGIN
+        RAISERROR ('Only Facility Staff or Facility Manager may approve or reject bookings.', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+END;
+GO
+
+-- ============================================================
+-- Trigger: TR_USAGESESSION_VALIDATE_STAFF_ROLES
+-- Validates check-in and check-out staff have Facility Staff
+-- or Facility Manager role (Assumption 1, REC-3).
+-- ============================================================
+CREATE TRIGGER TR_USAGESESSION_VALIDATE_STAFF_ROLES
+ON USAGESESSION
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN [USER] u ON i.check_in_staff_id = u.user_id
+        WHERE u.role NOT IN ('Facility Staff', 'Facility Manager')
+    )
+    BEGIN
+        RAISERROR ('Only Facility Staff or Facility Manager may perform check-in operations.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN [USER] u ON i.check_out_staff_id = u.user_id
+        WHERE u.role NOT IN ('Facility Staff', 'Facility Manager')
+    )
+    BEGIN
+        RAISERROR ('Only Facility Staff or Facility Manager may perform check-out operations.', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+END;
+GO
+
+-- ============================================================
+-- Trigger: TR_MAINTENANCE_VALIDATE_ASSIGNED_ROLE
+-- Validates assigned staff has Facility Staff or
+-- Facility Manager role (Assumption 1, REC-3).
+-- ============================================================
+CREATE TRIGGER TR_MAINTENANCE_VALIDATE_ASSIGNED_ROLE
+ON MAINTENANCERECORD
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN [USER] u ON i.assigned_staff_id = u.user_id
+        WHERE u.role NOT IN ('Facility Staff', 'Facility Manager')
+    )
+    BEGIN
+        RAISERROR ('Only Facility Staff or Facility Manager may be assigned to maintenance tasks.', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+END;
+GO
+
+-- ============================================================
+-- Trigger: TR_USAGESESSION_CHECK_BOOKING_STATUS
+-- Ensures a usage session can only be created for a booking
+-- with status 'Approved' (Assumption 9, REC-4).
+-- ============================================================
+CREATE TRIGGER TR_USAGESESSION_CHECK_BOOKING_STATUS
+ON USAGESESSION
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN BOOKING b ON i.booking_id = b.booking_id
+        WHERE b.booking_status <> 'Approved'
+    )
+    BEGIN
+        RAISERROR ('A usage session can only be created for a booking with status Approved.', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+END;
+GO
+
+-- ============================================================
+-- Trigger: TR_BOOKING_LOCK_APPROVED_FIELDS
+-- Prevents modification of space_code, requested_start, and
+-- requested_end once booking is approved (BR-22).
+-- ============================================================
+CREATE TRIGGER TR_BOOKING_LOCK_APPROVED_FIELDS
+ON BOOKING
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN deleted d ON i.booking_id = d.booking_id
+        WHERE d.booking_status = 'Approved'
+          AND (
+              i.space_code <> d.space_code
+              OR i.requested_start <> d.requested_start
+              OR i.requested_end <> d.requested_end
+          )
+    )
+    BEGIN
+        RAISERROR ('Once a booking has been approved, the space, start time, and end time cannot be modified. Cancel and resubmit instead.', 16, 1);
+        ROLLBACK TRANSACTION;
     END
 END;
 GO
