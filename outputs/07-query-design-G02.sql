@@ -475,8 +475,8 @@ FROM BOOKING b
 JOIN SPACE s ON b.space_code = s.space_code
 JOIN [USER] u ON b.requester_id = u.user_id
 WHERE b.booking_status = 'Approved'
-  AND b.requested_start >= CAST(GETDATE() AS DATE) + 1
-  AND b.requested_start <  CAST(GETDATE() AS DATE) + 2
+  AND b.requested_start >= DATEADD(DAY, 1, CAST(GETDATE() AS DATE))
+  AND b.requested_start <  DATEADD(DAY, 2, CAST(GETDATE() AS DATE))
 ORDER BY b.requested_start;
 GO
 
