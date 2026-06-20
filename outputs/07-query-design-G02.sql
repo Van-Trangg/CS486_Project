@@ -289,13 +289,13 @@ use University;
 go
 -- SQL:
 SELECT
-s.space_code,
-s.space_name,
-s.space_type,
-m.problem_type,
-m.maintenance_status,
-m.start_time,
-m.completion_time
+    s.space_code,
+    s.space_name,
+    s.space_type,
+    m.problem_type,
+    m.maintenance_status,
+    m.start_time,
+    m.completion_time
 FROM SPACE s
 JOIN MAINTENANCERECORD m
 ON s.space_code = m.space_code
@@ -323,8 +323,8 @@ CS-C3-F1-R001   Rutherford Project Lab   Project Laboratory    Projector Failure
 --   procurement, inventory, or configuration issues.
 -- SQL:
 SELECT
-f.facility_id,
-f.facility_name
+    f.facility_id,
+    f.facility_name
 FROM FACILITY f
 LEFT JOIN SPACE_FACILITY sf
 ON f.facility_id = sf.facility_id
@@ -353,23 +353,25 @@ facility_id     facility_name
 -- SQL:
 
 SELECT
-b.booking_id,
-b.requested_start,
-b.requested_end,
-b.expected_participants,
-b.booking_status,
-u.full_name AS requester_name
+    b.booking_id,
+    b.requested_start,
+    b.requested_end,
+    b.expected_participants,
+    b.booking_status,
+    u.full_name AS requester_name
 FROM BOOKING b
 JOIN [USER] u
 ON b.requester_id = u.user_id
-WHERE b.space_code = 'CS-C3-F1-R001'
+WHERE b.space_code = 'CS-B2-F1-R201'
 AND b.booking_status = 'Approved'
 ORDER BY b.requested_start;
 GO
 
 /*
 Sample Output (based on our test data):
-space_code      space_name               space_type            problem_type        maintenance_status      start_time                 completion_time
+booking_id    requested_start           requested_end            expected_participants  booking_status requester_name
+2	          2027-01-20 09:00:00.000	2027-01-20 11:00:00.000	 40	                    Approved	   Dr. Sarah Thompson
+6	          2027-02-15 14:00:00.000	2027-02-15 17:00:00.000	 30	                    Approved	   Alice Chen
 */
 
 -- ============================================================
@@ -388,29 +390,28 @@ space_code      space_name               space_type            problem_type     
 --   Supports efficient space allocation and booking planning.
 -- SQL:
 SELECT
-s.space_code,
-s.space_name,
-s.building,
-s.floor,
-s.capacity
+    s.space_code,
+    s.space_name,
+    s.building,
+    s.floor,
+    s.capacity
 FROM SPACE s
 WHERE s.space_type = 'Meeting Room'
-AND NOT EXISTS (
-SELECT 1
-FROM BOOKING b
-WHERE b.space_code = s.space_code
-AND b.booking_status = 'Approved'
-AND CAST(b.requested_start AS DATE) = '2026-07-15'
-AND b.requested_start > '2026-07-15 12:00:00'
-AND b.requested_end < '2026-07-15 10:00:00'
-)
+  AND s.current_status IN ('Available', 'In Use')
+  AND NOT EXISTS (
+      SELECT 1
+      FROM BOOKING b
+      WHERE b.space_code = s.space_code
+        AND b.booking_status = 'Approved'
+        AND b.requested_start < '2026-07-15 12:00:00'
+        AND b.requested_end > '2026-07-15 10:00:00'
+  )
 ORDER BY s.space_code;
 GO
-
 /*
 Sample Output (based on our test data):
-space_code      space_name          building    floor   capacity
-
+space_code      space_name             building       floor   capacity
+CS-A2-F2-R202	Hopper Meeting Room	   Building A2	  2	      16
 */
 
 -- ============================================================
@@ -428,25 +429,17 @@ space_code      space_name          building    floor   capacity
 --   Supports maintenance performance monitoring.
 -- SQL:
 SELECT
-s.space_code,
-s.space_name,
-m.problem_type,
-m.maintenance_status,
-m.start_time,
-m.completion_time,
-DATEDIFF(
-DAY,
-m.start_time,
-ISNULL(m.completion_time, GETDATE())
-) AS maintenance_days
+    s.space_code,
+    s.space_name,
+    m.problem_type,
+    m.maintenance_status,
+    m.start_time,
+    m.completion_time,
+DATEDIFF(DAY,nm.start_time,ISNULL(m.completion_time, GETDATE())) AS maintenance_days
 FROM MAINTENANCERECORD m
-JOIN SPACE s
-ON m.space_code = s.space_code
-WHERE DATEDIFF(
-DAY,
-m.start_time,
-ISNULL(m.completion_time, GETDATE())
-) > 5
+JOIN SPACE s ON m.space_code = s.space_code
+WHERE m.maintenance_status IN ('Reported', 'In Progress')
+  AND DATEDIFF(DAY, m.start_time, ISNULL(m.completion_time, GETDATE())) > 5
 ORDER BY maintenance_days DESC;
 GO
 
