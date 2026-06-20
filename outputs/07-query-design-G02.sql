@@ -447,3 +447,180 @@ GO
 Sample Output (based on our test data):
 space_code      space_name          problem_type        maintenance_status      start_time                 completion_time          maintenance_days
 */
+
+-- ============================================================
+-- QUERY 11
+-- ============================================================
+-- Business question: Which approved bookings are scheduled for tomorrow, and who is responsible for them?
+
+-- Target user(s): Facility Staff, Facility Manager
+
+-- Why this is useful: 
+--  Facility staff currently rely on manually checking spreadsheets to know which rooms will be in use and who is arriving. 
+--  This query gives staff a same-day operational view before the start of each shift (who is coming, to which room, and for what purpose) so they can prepare the space, verify it isn't flagged for maintenance, and be ready to check the requester in when they arrive.
+
+-- SQL:
+SELECT
+    b.booking_id,
+    s.space_name,
+    s.building,
+    s.room_number,
+    u.full_name        AS requester_name,
+    u.department,
+    b.purpose,
+    b.requested_start,
+    b.requested_end,
+    b.expected_participants
+FROM BOOKING b
+JOIN SPACE s ON b.space_code = s.space_code
+JOIN [USER] u ON b.requester_id = u.user_id
+WHERE b.booking_status = 'Approved'
+  AND b.requested_start >= CAST(GETDATE() AS DATE) + 1
+  AND b.requested_start <  CAST(GETDATE() AS DATE) + 2
+ORDER BY b.requested_start;
+GO
+
+/* Sample Output (based on our test data, assuming query executed 2027-02-14):
+booking_id space_name       building    room_number requester_name department       purpose          requested_start     requested_end       expected_participants
+---------- ---------------- ----------- ----------- -------------- ---------------- ---------------- ------------------- ------------------- ---------------------
+         6 Turing Classroom Building B2 R201        Alice Chen     Computer Science Student Activity 2027-02-15 14:00:00 2027-02-15 17:00:00                    30
+*/
+
+-- ============================================================
+-- QUERY 12
+-- ============================================================
+-- Business question: Which spaces are most frequently booked but never actually used, and what is the no-show rate as a % of total approved bookings for that room?
+
+-- Target user(s): Facility Manager, Department Administrator
+
+-- Why this is useful: 
+--  No-shows waste shared resource that could be allocated to someone else who needed it, especially for those that is in high demand. Managers also need to ensure fair distribution of the spaces.
+--  This query identifies where no-show behavior is concentrated within the last 6 months, which allows Facility Managers to  tighten booking policies for these specific rooms or investigate whether a particular department is the source of repeated no-shows. 
+
+-- SQL:
+SELECT
+    s.space_code,
+    s.space_name,
+    s.building,
+    COUNT(*) AS total_approved_bookings,
+    SUM(CASE WHEN b.booking_status = 'No-Show' THEN 1 ELSE 0 END) AS no_show_count,
+    CAST(
+        100.0 * SUM(CASE WHEN b.booking_status = 'No-Show' THEN 1 ELSE 0 END)
+        / COUNT(*) AS DECIMAL(5,2)
+    ) AS no_show_rate_pct
+FROM BOOKING b
+JOIN SPACE s ON b.space_code = s.space_code
+WHERE b.booking_status IN ('No-Show', 'Completed')
+  AND b.requested_start >= DATEADD(MONTH, -6, GETDATE())
+GROUP BY s.space_code, s.space_name, s.building
+HAVING COUNT(*) >= 5
+ORDER BY no_show_rate_pct DESC;
+GO
+
+/* Sample Output (based on our test data)
+space_code space_name building total_approved_bookings no_show_count no_show_rate_pct
+---------- ---------- -------- ----------------------- ------------- ----------------
+(0 rows due to count >= 5 constraint)
+*/
+
+-- ============================================================
+-- QUERY 13
+-- ============================================================
+-- Business question:  How accurately do requesters estimate their booking duration
+
+-- Target user(s): Facility Manager, Department Administrator
+
+-- Why this is useful: 
+--   Booking durations are self-reported at request time, but the system also records actual check-in and check-out times once a session finishes. Comparing the two reveals whether certain booking purposes (e.g., Examinations vs. Meetings) systematically run longer than requested.
+--   This insight lets the Facility Manager consider default buffer time for purpose types with a history of overrun to ensure smooth future operations and reduce back-to-back bookings collision.
+
+-- SQL:
+SELECT
+    b.purpose,
+    COUNT(*) AS sessions_with_checkout,
+    AVG(DATEDIFF(MINUTE, b.requested_start, b.requested_end)) AS avg_requested_minutes,
+    AVG(DATEDIFF(MINUTE, us.actual_start, us.actual_end))     AS avg_actual_minutes,
+    AVG(
+        DATEDIFF(MINUTE, us.actual_start, us.actual_end)
+        - DATEDIFF(MINUTE, b.requested_start, b.requested_end)
+    ) AS avg_overrun_minutes
+FROM BOOKING b
+JOIN USAGESESSION us ON b.booking_id = us.booking_id
+WHERE us.actual_end IS NOT NULL
+GROUP BY b.purpose
+ORDER BY avg_overrun_minutes DESC;
+GO
+
+/* Sample Output (based on our test data):
+purpose sessions_with_checkout avg_requested_minutes avg_actual_minutes avg_overrun_minutes
+------- ---------------------- ---------------------- ------------------- --------------------
+Lecture                      1                    120                 123                    3
+Seminar                      1                    120                 115                   -5
+*/
+
+-- ============================================================
+-- QUERY 14
+-- ============================================================
+-- Business question:  Which spaces face the most booking competition in general, and specifically on which day of the week?
+
+-- Target user(s): Facility Manager, Department Administrator
+
+-- Why this is useful: 
+--   Managers may need to identify high-demand combinations of a room corresponding with specific time slots where demand is too high.
+--   To avoid overlapping bookings while allowing everyone to have a fair chance of using the space, managers can use the results of this query to consider additional capacity, extended booking window, or a stricter priority policy for these room or certain time slots.
+
+-- SQL:
+SELECT
+    s.space_name,
+    s.building,
+    DATENAME(WEEKDAY, b.requested_start) AS day_of_week,
+    COUNT(*) AS total_requests,
+    SUM(CASE WHEN b.booking_status = 'Approved' THEN 1 ELSE 0 END)  AS approved_count,
+    SUM(CASE WHEN b.booking_status = 'Rejected' THEN 1 ELSE 0 END)  AS rejected_count
+FROM BOOKING b
+JOIN SPACE s ON b.space_code = s.space_code
+WHERE b.requested_start >= DATEADD(MONTH, -3, GETDATE())
+GROUP BY s.space_name, s.building, DATENAME(WEEKDAY, b.requested_start)
+HAVING COUNT(*) >= 3
+ORDER BY total_requests DESC;
+GO
+
+/* Sample Output (based on our test data)
+space_name building day_of_week total_requests approved_count rejected_count
+---------- -------- ----------- -------------- -------------- --------------
+(0 rows due to to count >= 3 constraint)
+*/
+
+-- ============================================================
+-- QUERY 15 
+-- ============================================================
+-- Business question:  Which facilities are currently unusable, and what spaces are affected?
+
+-- Target user(s): Facility Staff, Lecturer/Teaching Assistant
+
+-- Why this is useful: 
+--   A space can be Available in overall status while a specific piece of equipment inside it (a projector, a microphone) is broken.
+--   Allows staff to check whether a room is suitable for a requester and inform them promptly before they make their booking.
+
+-- SQL:
+SELECT
+    s.space_name,
+    s.building,
+    s.room_number,
+    f.facility_name,
+    sf.quantity,
+    sf.operation_status,
+    sf.description AS fault_notes
+FROM SPACE_FACILITY sf
+JOIN SPACE s ON sf.space_code = s.space_code
+JOIN FACILITY f ON sf.facility_id = f.facility_id
+WHERE sf.operation_status IN ('Broken', 'Partially Operational')
+ORDER BY s.space_name, f.facility_name;
+GO
+
+/* Sample Output (based on our test data):
+space_name             building    room_number facility_name        quantity operation_status      fault_notes
+---------------------- ----------- ----------- -------------------- -------- --------------------- --------------------------------------------------------------------------
+Lovelace Lab           Building B2 R205        Computer Workstation       25 Partially Operational 25 workstations operational. 5 workstations in Row C awaiting maintenance.
+Rutherford Project Lab Building C3 R001        Air Conditioner             2 Broken                Both air conditioning units non-functional. Parts on order.
+*/
