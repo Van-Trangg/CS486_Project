@@ -270,3 +270,187 @@ space_code      space_name       space_type           building         room_numb
 CS-B2-F1-R101   Auditorium A     Auditorium           Bateson Hall     101              200 Available
 CS-B2-F1-R102   Lab 102          Computer Laboratory  Bateson Hall     102               40 Available
 */
+
+-- ============================================================
+-- QUERY 6: Spaces with a Specific Maintenance Issue
+-- ============================================================
+-- Business Objective:
+--   Identify all spaces that have experienced a particular maintenance issue
+--   (e.g., Projector Failure, Network Issue, Air-Conditioning Issue).
+-- Target Audience:
+--   Facility Staff
+--   Facility Manager
+-- Practical Value:
+--   Helps maintenance teams quickly locate affected rooms and identify
+--   recurring problem areas. Supports maintenance planning and resource
+--   allocation for common equipment failures.
+----------------------------------------------
+use University;
+go
+-- SQL:
+SELECT
+s.space_code,
+s.space_name,
+s.space_type,
+m.problem_type,
+m.maintenance_status,
+m.start_time,
+m.completion_time
+FROM SPACE s
+JOIN MAINTENANCERECORD m
+ON s.space_code = m.space_code
+WHERE m.problem_type = 'Projector Failure'
+ORDER BY m.start_time DESC;
+GO
+
+/*
+Sample Output (based on our test data):
+space_code      space_name               space_type            problem_type        maintenance_status      start_time                 completion_time
+CS-C3-F1-R001   Rutherford Project Lab   Project Laboratory    Projector Failure   In Progress             2027-01-15 08:00:00.000    NULL
+*/
+
+-- ============================================================
+-- QUERY 7: Unassigned Facility Catalog Items
+-- ============================================================
+-- Business Objective:
+--   Identify facility types that have not yet been assigned to any space.
+-- Target Audience:
+--   Facility Staff
+--   Facility Manager
+-- Practical Value:
+--   Supports inventory auditing by identifying equipment recorded in the
+--   facility catalog but not currently deployed in any room. Helps detect
+--   procurement, inventory, or configuration issues.
+-- SQL:
+SELECT
+f.facility_id,
+f.facility_name
+FROM FACILITY f
+LEFT JOIN SPACE_FACILITY sf
+ON f.facility_id = sf.facility_id
+WHERE sf.facility_id IS NULL
+ORDER BY f.facility_name;
+GO
+
+/*
+Sample Output (based on our test data):
+facility_id     facility_name
+(Empty result set)
+*/
+
+-- ============================================================
+-- QUERY 8: Approved Bookings for a Specific Space
+-- ============================================================
+-- Business Objective:
+--   Display all approved bookings scheduled for a specific physical space.
+-- Target Audience:
+--   Facility Staff
+--   Department Administrator
+-- Practical Value:
+--   Provides a complete schedule of approved reservations for a room,
+--   supporting operational planning, conflict investigation, and room
+--   utilization monitoring.
+-- SQL:
+
+SELECT
+b.booking_id,
+b.requested_start,
+b.requested_end,
+b.expected_participants,
+b.booking_status,
+u.full_name AS requester_name
+FROM BOOKING b
+JOIN [USER] u
+ON b.requester_id = u.user_id
+WHERE b.space_code = 'CS-C3-F1-R001'
+AND b.booking_status = 'Approved'
+ORDER BY b.requested_start;
+GO
+
+/*
+Sample Output (based on our test data):
+space_code      space_name               space_type            problem_type        maintenance_status      start_time                 completion_time
+*/
+
+-- ============================================================
+-- QUERY 9: Available Spaces of a Specific Type During a Time Window
+-- ============================================================
+-- Business Objective:
+--   Identify spaces of a specific type that have no approved bookings
+--   during a specified time period on a particular day.
+-- Target Audience:
+--   Student
+--   Lecturer
+--   Department Administrator
+-- Practical Value:
+--   Helps users quickly locate available rooms that satisfy their
+--   requirements without manually checking individual schedules.
+--   Supports efficient space allocation and booking planning.
+-- SQL:
+SELECT
+s.space_code,
+s.space_name,
+s.building,
+s.floor,
+s.capacity
+FROM SPACE s
+WHERE s.space_type = 'Meeting Room'
+AND NOT EXISTS (
+SELECT 1
+FROM BOOKING b
+WHERE b.space_code = s.space_code
+AND b.booking_status = 'Approved'
+AND CAST(b.requested_start AS DATE) = '2026-07-15'
+AND b.requested_start > '2026-07-15 12:00:00'
+AND b.requested_end < '2026-07-15 10:00:00'
+)
+ORDER BY s.space_code;
+GO
+
+/*
+Sample Output (based on our test data):
+space_code      space_name          building    floor   capacity
+
+*/
+
+-- ============================================================
+-- QUERY 10: Long-Running Maintenance Activities
+-- ============================================================
+-- Business Objective:
+--   Identify rooms that have remained under maintenance for more
+--   than five days.
+-- Target Audience:
+--   Facility Manager
+--   Facility Staff
+-- Practical Value:
+--   Highlights potentially delayed maintenance tasks requiring
+--   escalation, additional resources, or management attention.
+--   Supports maintenance performance monitoring.
+-- SQL:
+SELECT
+s.space_code,
+s.space_name,
+m.problem_type,
+m.maintenance_status,
+m.start_time,
+m.completion_time,
+DATEDIFF(
+DAY,
+m.start_time,
+ISNULL(m.completion_time, GETDATE())
+) AS maintenance_days
+FROM MAINTENANCERECORD m
+JOIN SPACE s
+ON m.space_code = s.space_code
+WHERE DATEDIFF(
+DAY,
+m.start_time,
+ISNULL(m.completion_time, GETDATE())
+) > 5
+ORDER BY maintenance_days DESC;
+GO
+
+/*
+Sample Output (based on our test data):
+space_code      space_name          problem_type        maintenance_status      start_time                 completion_time          maintenance_days
+*/
