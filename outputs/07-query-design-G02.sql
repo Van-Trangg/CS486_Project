@@ -624,3 +624,204 @@ space_name             building    room_number facility_name        quantity ope
 Lovelace Lab           Building B2 R205        Computer Workstation       25 Partially Operational 25 workstations operational. 5 workstations in Row C awaiting maintenance.
 Rutherford Project Lab Building C3 R001        Air Conditioner             2 Broken                Both air conditioning units non-functional. Parts on order.
 */
+
+-- ============================================================
+-- QUERY 16: Urgent Pending Bookings (Starting Within 24 Hours)
+-- ============================================================
+-- Business Objective:
+--   Identify pending booking requests that are scheduled to start
+--   within the next 24 hours, enabling staff to prioritise approvals.
+--
+-- Target Audience:
+--   Facility Staff, Facility Manager.
+--
+-- Practical Value:
+--   Prevents last‑minute schedule gaps and ensures requesters are not
+--   left waiting without a decision on the day of their event.
+--
+-- SQL:
+SELECT
+    b.booking_id,
+    u.full_name AS requester,
+    u.role,
+    s.space_name,
+    s.space_type,
+    b.requested_start,
+    b.requested_end,
+    b.purpose,
+    b.expected_participants,
+    b.created_at
+FROM BOOKING b
+JOIN [USER] u ON b.requester_id = u.user_id
+JOIN SPACE s ON b.space_code = s.space_code
+WHERE b.booking_status = 'Pending'
+  AND b.requested_start BETWEEN GETDATE() AND DATEADD(DAY, 1, GETDATE())
+ORDER BY b.requested_start;
+GO
+
+/*
+Sample Output:
+booking_id  requester      role     space_name    space_type  requested_start        ...
+----------  -------------  -------  ------------  ----------  -------------------  ...
+(rows only when pending bookings fall within the next 24 hours)
+*/
+
+
+-- ============================================================
+-- QUERY 17: Average Booking Lead Time by Purpose
+-- ============================================================
+-- Business Objective:
+--   Calculate how many days in advance each purpose type is typically
+--   booked, comparing the request creation date to the scheduled start.
+--
+-- Target Audience:
+--   Facility Manager, Department Administrator.
+--
+-- Practical Value:
+--   Helps set minimum notice policies for different event types and
+--   identify which purposes are planned vs. last‑minute requests.
+--
+-- SQL:
+SELECT
+    purpose,
+    COUNT(*) AS total_bookings,
+    AVG(DATEDIFF(DAY, created_at, requested_start)) AS avg_lead_days,
+    MIN(DATEDIFF(DAY, created_at, requested_start)) AS min_lead_days,
+    MAX(DATEDIFF(DAY, created_at, requested_start)) AS max_lead_days
+FROM BOOKING
+WHERE requested_start >= created_at   -- safety check
+GROUP BY purpose
+ORDER BY avg_lead_days DESC;
+GO
+
+/*
+Sample Output (based on test data):
+purpose               total_bookings  avg_lead_days  min_lead_days  max_lead_days
+--------------------  --------------  -------------  -------------  -------------
+Examination                        2             21             21             21
+Administrative Event               2             17             17             18
+Workshop                           2             17             14             21
+Seminar                            1             15             15             15
+Student Activity                   2             13             12             14
+Lecture                            2             12              7             17
+Meeting                            2             11              7             15
+*/
+
+
+-- ============================================================
+-- QUERY 18: Spaces That Have Never Been Booked
+-- ============================================================
+-- Business Objective:
+--   Identify rooms that have never appeared in any booking request.
+--
+-- Target Audience:
+--   Facility Manager, Department Administrator.
+--
+-- Practical Value:
+--   Helps identify completely unused spaces that could be reallocated,
+--   upgraded, or designated for non‑bookable activities without
+--   impacting current users.
+--
+-- SQL:
+SELECT
+    s.space_code,
+    s.space_name,
+    s.space_type,
+    s.building,
+    s.capacity
+FROM SPACE s
+LEFT JOIN BOOKING b ON s.space_code = b.space_code
+WHERE b.booking_id IS NULL
+ORDER BY s.space_type, s.space_code;
+GO
+
+/*
+Sample Output:
+space_code      space_name              space_type         building       capacity
+--------------- ----------------------- ------------------ -------------- --------
+CS-A1-F3-R301   Berners-Lee Lecture Hall Auditorium         Building A1         150
+CS-B1-F1-R102   Einstein Workspace       Student Workspace  Building B1          50
+*/
+
+
+-- ============================================================
+-- QUERY 19: Users Who Have Never Made a Booking
+-- ============================================================
+-- Business Objective:
+--   List all users who have never submitted a booking request.
+--
+-- Target Audience:
+--   Department Administrator, Facility Manager.
+--
+-- Practical Value:
+--   Useful for account housekeeping, identifying inactive accounts
+--   that could be suspended, or understanding which user groups
+--   are not yet utilising the system.
+--
+-- SQL:
+SELECT
+    u.user_id,
+    u.full_name,
+    u.role,
+    u.department,
+    u.account_status
+FROM [USER] u
+LEFT JOIN BOOKING b ON u.user_id = b.requester_id
+WHERE b.booking_id IS NULL
+ORDER BY u.role, u.full_name;
+GO
+
+/*
+Sample Output (based on test data):
+user_id      full_name           role               department         account_status
+-----------  ------------------- ------------------ ------------------ --------------
+MGR2017001   Priya Sharma        Facility Manager   Computer Science   Active
+STF2020002   Emily Nakamura      Facility Staff     Computer Science   Active
+STF2019001   Michael Okonkwo     Facility Staff     Computer Science   Active
+LEC2019003   Prof. Robert Kim    Lecturer           Computer Science   Inactive
+STU2021004   Lisa Johansson      Student            Computer Science   Suspended
+*/
+
+
+-- ============================================================
+-- QUERY 20: Users with Highest Rejection Rate
+-- ============================================================
+-- Business Objective:
+--   Identify users who have the highest proportion of their booking
+--   requests rejected, to uncover repeated policy violations or
+--   misunderstandings of booking rules.
+--
+-- Target Audience:
+--   Facility Manager, Department Administrator.
+--
+-- Practical Value:
+--   Enables targeted training or policy clarification for users who
+--   frequently submit invalid requests, reducing future rejections
+--   and improving efficient use of spaces.
+--
+-- SQL:
+SELECT
+    u.user_id,
+    u.full_name,
+    u.role,
+    u.department,
+    COUNT(b.booking_id) AS total_submitted,
+    SUM(CASE WHEN b.booking_status = 'Rejected' THEN 1 ELSE 0 END) AS rejected_count,
+    CAST(
+        100.0 * SUM(CASE WHEN b.booking_status = 'Rejected' THEN 1 ELSE 0 END)
+        / NULLIF(COUNT(b.booking_id), 0) AS DECIMAL(5,2)
+    ) AS rejection_rate_pct
+FROM [USER] u
+JOIN BOOKING b ON u.user_id = b.requester_id
+GROUP BY u.user_id, u.full_name, u.role, u.department
+HAVING SUM(CASE WHEN b.booking_status = 'Rejected' THEN 1 ELSE 0 END) > 0
+ORDER BY rejection_rate_pct DESC, rejected_count DESC;
+GO
+
+/*
+Sample Output (based on our test data):
+user_id      full_name       role                department         total_submitted rejected_count rejection_rate_pct
+-----------  --------------  ------------------- ------------------ --------------- -------------- ------------------
+TA2024001    James Wilson    Teaching Assistant  Computer Science               2              1              50.00
+ADM2018001   David Park      Department Admin.   Computer Science               3              1              33.33
+*/
