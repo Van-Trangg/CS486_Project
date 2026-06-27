@@ -548,6 +548,10 @@ FROM BOOKING b
 JOIN USAGESESSION us ON b.booking_id = us.booking_id
 WHERE us.actual_end IS NOT NULL
 GROUP BY b.purpose
+HAVING AVG(
+    DATEDIFF(MINUTE, us.actual_start, us.actual_end)
+    - DATEDIFF(MINUTE, b.requested_start, b.requested_end)
+) > 0
 ORDER BY avg_overrun_minutes DESC;
 GO
 
@@ -555,7 +559,6 @@ GO
 purpose sessions_with_checkout avg_requested_minutes avg_actual_minutes avg_overrun_minutes
 ------- ---------------------- ---------------------- ------------------- --------------------
 Lecture                      1                    120                 123                    3
-Seminar                      1                    120                 115                   -5
 */
 
 -- ============================================================
