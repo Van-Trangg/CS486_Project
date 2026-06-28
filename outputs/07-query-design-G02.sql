@@ -647,16 +647,23 @@ SELECT
     b.booking_id,
     u.full_name AS requester,
     u.role,
+    u.email,
     s.space_name,
     s.space_type,
     b.requested_start,
     b.requested_end,
     b.purpose,
     b.expected_participants,
-    b.created_at
+    b.created_at,
+    ROUND(DATEDIFF(MINUTE, GETDATE(), b.requested_start) / 60.0, 1) AS hours_until_start,
+    CASE
+        WHEN b.requested_start <= DATEADD(HOUR,  2, GETDATE()) THEN 'Critical (< 2h)'
+        WHEN b.requested_start <= DATEADD(HOUR,  8, GETDATE()) THEN 'High     (2-8h)'
+        ELSE                                                         'Normal  (8-24h)'
+    END AS urgency_tier
 FROM BOOKING b
 JOIN [USER] u ON b.requester_id = u.user_id
-JOIN SPACE s ON b.space_code = s.space_code
+JOIN SPACE  s ON b.space_code   = s.space_code
 WHERE b.booking_status = 'Pending'
   AND b.requested_start BETWEEN GETDATE() AND DATEADD(DAY, 1, GETDATE())
 ORDER BY b.requested_start;
@@ -664,9 +671,8 @@ GO
 
 /*
 Sample Output:
-booking_id  requester      role     space_name    space_type  requested_start        ...
-----------  -------------  -------  ------------  ----------  -------------------  ...
-(rows only when pending bookings fall within the next 24 hours)
+booking_id  requester        role                  email                              space_name              space_type        requested_start          requested_end            purpose           expected_participants  created_at               hours_until_start  urgency_tier
+----------  ---------------  --------------------  ---------------------------------  ----------------------  ----------------  -----------------------  -----------------------  ----------------  --------------------  -----------------------  -----------------  ---------------
 */
 
 
@@ -731,19 +737,22 @@ SELECT
     s.space_name,
     s.space_type,
     s.building,
-    s.capacity
+    s.floor,
+    s.room_number,
+    s.capacity,
+    s.current_status
 FROM SPACE s
 LEFT JOIN BOOKING b ON s.space_code = b.space_code
 WHERE b.booking_id IS NULL
-ORDER BY s.space_type, s.space_code;
+ORDER BY s.current_status, s.space_type, s.space_code;
 GO
 
 /*
 Sample Output:
-space_code      space_name              space_type         building       capacity
---------------- ----------------------- ------------------ -------------- --------
-CS-A1-F3-R301   Berners-Lee Lecture Hall Auditorium         Building A1         150
-CS-B1-F1-R102   Einstein Workspace       Student Workspace  Building B1          50
+space_code      space_name              space_type         building       floor  room_number capacity current_status
+--------------- ----------------------- ------------------ -------------- ----- ----------- -------- ----------------------
+CS-A1-F3-R301   Berners-Lee Lecture Hall Auditorium         Building A1    3      R301        150      Retired
+CS-B1-F1-R102   Einstein Workspace       Student Workspace  Building B1    1      R102        50       Temporarily Closed
 */
 
 
