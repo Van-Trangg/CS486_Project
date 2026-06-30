@@ -53,7 +53,7 @@ To design the ERD, use:
 .opencode/skills/erd-design/SKILL.md
 
 Then, self-diagnose and cross-examine generated ERD by using:
-.opencode/skills/erd-review/SKILL.md
+.opencode/skills/db-review/erd-review/SKILL.md
 
 Finally, using review from:
 docs\02-erd-design-review-G02.md
@@ -67,7 +67,7 @@ To design the logical schema, strictly follow instructions at:
 .opencode/skills/logical-design/SKILL.md
 
 After producing the logical schema, self-diagnose and cross-examine with BRA & ERD by following:
-.opencode/skills/logical-design-review/SKILL.md
+.opencode/skills/db-review/logical-design-review/SKILL.md
 
 Verify and correct output (if applicable) using review from:
 docs\03-logical-design-review-G02.md

@@ -8,6 +8,6 @@ Use:
 .opencode/skills/erd-design/SKILL.md
 
 Then use:
-.opencode/skills/erd-review/SKILL.md
+.opencode/skills/db-review/erd-review/SKILL.md
 
 
