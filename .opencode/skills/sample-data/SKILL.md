@@ -172,6 +172,7 @@ Sample data must be realistic and recognisable, not placeholder text:
 - **Descriptions and notes:** Write brief but coherent prose, not `'test note'` or `'description here'`.
 - **Dates and times:** Use realistic scheduling — business hours, semester periods, appropriate durations.
 - **Numeric values:** Use values that reflect reality (e.g., room capacity of 30–200, not 1 or 9999).
+- **Bookings**: All seeded Bookings with status "Completed" must still have `requested_start` and `requested_end` columns filled to simulate an "Approved" booking that had been approved, taken place and marked for completion.
 
 Avoid: `'User1'`, `'test@test.com'`, `'Room A'`, `'note'`, `'description'`, or any other placeholder.
 
