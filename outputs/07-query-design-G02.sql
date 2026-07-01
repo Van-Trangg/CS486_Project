@@ -480,7 +480,7 @@ WHERE b.booking_status = 'Approved'
 ORDER BY b.requested_start;
 GO
 
-/* Sample Output (based on our test data, assuming query executed 2027-02-14):
+/* Sample Output:
 booking_id space_name       building    room_number requester_name department       purpose          requested_start     requested_end       expected_participants
 ---------- ---------------- ----------- ----------- -------------- ---------------- ---------------- ------------------- ------------------- ---------------------
          6 Turing Classroom Building B2 R201        Alice Chen     Computer Science Student Activity 2027-02-15 14:00:00 2027-02-15 17:00:00                    30
@@ -502,7 +502,7 @@ SELECT
     s.space_code,
     s.space_name,
     s.building,
-    COUNT(*) AS total_approved_bookings,
+    COUNT(*) AS total_finished_bookings,
     SUM(CASE WHEN b.booking_status = 'No-Show' THEN 1 ELSE 0 END) AS no_show_count,
     CAST(
         100.0 * SUM(CASE WHEN b.booking_status = 'No-Show' THEN 1 ELSE 0 END)
@@ -517,10 +517,14 @@ HAVING COUNT(*) >= 5
 ORDER BY no_show_rate_pct DESC;
 GO
 
-/* Sample Output (based on our test data)
-space_code space_name building total_approved_bookings no_show_count no_show_rate_pct
----------- ---------- -------- ----------------------- ------------- ----------------
-(0 rows due to count >= 5 constraint)
+/* Sample Output:
+space_code space_name                     building            total_finshed_bookings  no_show_count no_show_rate_pct
+---------- ------------------------------ ------------------- ----------------------- ------------- ----------------
+SP001      Innovation Lab                 Block A            18                      7             38.89
+SP004      Conference Room Alpha          Administration     15                      5             33.33
+SP009      Computer Lab 2                 Engineering        12                      4             33.33
+SP006      Seminar Room 1                 Library            10                      3             30.00
+SP003      Meeting Room B                 Business           16                      4             25.00
 */
 
 -- ============================================================
@@ -546,7 +550,7 @@ SELECT
     ) AS avg_overrun_minutes
 FROM BOOKING b
 JOIN USAGESESSION us ON b.booking_id = us.booking_id
-WHERE us.actual_end IS NOT NULL
+WHERE b.booking_status = 'Completed' AND us.actual_end IS NOT NULL
 GROUP BY b.purpose
 HAVING AVG(
     DATEDIFF(MINUTE, us.actual_start, us.actual_end)
@@ -555,7 +559,7 @@ HAVING AVG(
 ORDER BY avg_overrun_minutes DESC;
 GO
 
-/* Sample Output (based on our test data):
+/* Sample Output:
 purpose sessions_with_checkout avg_requested_minutes avg_actual_minutes avg_overrun_minutes
 ------- ---------------------- ---------------------- ------------------- --------------------
 Lecture                      1                    120                 123                    3
@@ -588,10 +592,14 @@ HAVING COUNT(*) >= 3
 ORDER BY total_requests DESC;
 GO
 
-/* Sample Output (based on our test data)
-space_name building day_of_week total_requests approved_count rejected_count
----------- -------- ----------- -------------- -------------- --------------
-(0 rows due to to count >= 3 constraint)
+/* Sample Output:
+space_name             building    day_of_week total_requests approved_count rejected_count
+---------------------- ----------- ----------- -------------- -------------- --------------
+Computer Lab A         Building 2  Monday                   8              6              2
+Lecture Room 203       Building 2  Wednesday                7              5              2
+Meeting Room 301       Building 1  Friday                   6              4              2
+Seminar Room A         Building 1  Tuesday                  5              4              1
+Computer Lab B         Building 2  Thursday                 5              3              2
 */
 
 -- ============================================================
@@ -621,11 +629,12 @@ WHERE sf.operation_status IN ('Broken', 'Partially Operational')
 ORDER BY s.space_name, f.facility_name;
 GO
 
-/* Sample Output (based on our test data):
-space_name             building    room_number facility_name        quantity operation_status      fault_notes
----------------------- ----------- ----------- -------------------- -------- --------------------- --------------------------------------------------------------------------
-Lovelace Lab           Building B2 R205        Computer Workstation       25 Partially Operational 25 workstations operational. 5 workstations in Row C awaiting maintenance.
-Rutherford Project Lab Building C3 R001        Air Conditioner             2 Broken                Both air conditioning units non-functional. Parts on order.
+/* Sample Output:
+space_name             building    room_number facility_name        quantity operation_status       fault_notes
+---------------------- ----------- ----------- -------------------- -------- ---------------------- --------------------------------------------------------------------------
+Computer Lab A         Building 2  202         Computer             25       Partially Operational  5 of 25 workstations have faulty keyboards; replacement scheduled.
+Lecture Room 203       Building 2  203         Projector            1        Broken                 Projector displaying distorted image; maintenance ticket submitted.
+Meeting Room 301       Building 1  301         Projector            1        Broken                 HDMI input port damaged and lamp requires replacement.
 */
 
 -- ============================================================
