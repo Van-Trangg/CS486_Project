@@ -518,13 +518,13 @@ ORDER BY no_show_rate_pct DESC;
 GO
 
 /* Sample Output:
-space_code space_name                     building            total_finshed_bookings  no_show_count no_show_rate_pct
----------- ------------------------------ ------------------- ----------------------- ------------- ----------------
-SP001      Innovation Lab                 Block A            18                      7             38.89
-SP004      Conference Room Alpha          Administration     15                      5             33.33
-SP009      Computer Lab 2                 Engineering        12                      4             33.33
-SP006      Seminar Room 1                 Library            10                      3             30.00
-SP003      Meeting Room B                 Business           16                      4             25.00
+space_code         space_name                     building            total_finshed_bookings  no_show_count no_show_rate_pct
+------------------ ------------------------------ ------------------- ----------------------- ------------- ----------------
+CS-B1-F2-R201      Innovation Lab                 Block A             18                      7             38.89
+CS-B3-F1-R015      Conference Room Alpha          Administration      15                      5             33.33
+CS-B2-F1-R101      Computer Lab 2                 Engineering         12                      4             33.33
+CS-B1-F0-R001      Seminar Room 1                 Library             10                      3             30.00
+CS-B2-F2-R205      Meeting Room B                 Business            16                      4             25.00
 */
 
 -- ============================================================
