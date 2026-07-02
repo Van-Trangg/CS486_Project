@@ -216,8 +216,6 @@ The cardinality and participation constraints for each relationship are justifie
 
 ## 7. Business Rules
 
-The following explicit business rules are derived directly from the requirement text.
-
 1. **Mandatory Account Rule:** Every system user must have a valid university account.
    - *Requirement Text:* "Each user must have a university account." (line 10)
 2. **Standard User Information:** The system must record unique user IDs, names, emails, phones, roles, departments, and account status.
