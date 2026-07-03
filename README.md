@@ -129,6 +129,9 @@ Run the custom command:
 /design-db req/business-requirement.md
 /step2
 /design-step3
+/step4
+/step5
+/step6
 ```
 
 If your group uses a different command name, update this README with the correct command.
