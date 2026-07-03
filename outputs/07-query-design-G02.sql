@@ -638,45 +638,46 @@ Meeting Room 301       Building 1  301         Projector            1        Bro
 */
 
 -- ============================================================
--- QUERY 16: Urgent Pending Bookings (Starting Within 24 Hours)
+-- QUERY 16: Bookings Nearing Room Capacity
 -- ============================================================
 -- Business Objective:
---   Identify pending booking requests that are scheduled to start
---   within the next 24 hours, enabling staff to prioritise approvals.
+--   Rank live bookings by how close expected_participants comes to
+--   the room's capacity.
 --
 -- Target Audience:
---   Facility Staff, Facility Manager.
+--   Facility Staff (pre-event checks), Department Administrator.
 --
 -- Practical Value:
---   Prevents last‑minute schedule gaps and ensures requesters are not
---   left waiting without a decision on the day of their event.
+--   CK_BOOKING_CAPACITY_LIMIT stops anyone from exceeding capacity,
+--   but it won't flag a booking that's legally fine at 95% full and
+--   might warrant a bigger room, extra chairs, or a comfort/fire-code
+--   sanity check.
 --
 -- SQL:
-SELECT
+SELECT TOP 5
     b.booking_id,
-    u.full_name AS requester,
-    u.role,
-    u.email,
     s.space_name,
-    s.space_type,
-    b.requested_start,
-    b.requested_end,
-    b.purpose,
+    s.capacity,
     b.expected_participants,
-    b.created_at,
-    ROUND(DATEDIFF(MINUTE, GETDATE(), b.requested_start) / 60.0, 1) AS hours_until_start,
-    CASE
-        WHEN b.requested_start <= DATEADD(HOUR,  2, GETDATE()) THEN 'Critical (< 2h)'
-        WHEN b.requested_start <= DATEADD(HOUR,  8, GETDATE()) THEN 'High     (2-8h)'
-        ELSE                                                         'Normal  (8-24h)'
-    END AS urgency_tier
+    CAST(100.0 * b.expected_participants / s.capacity AS DECIMAL(5,2)) AS capacity_utilization_pct,
+    b.purpose,
+    b.booking_status
 FROM BOOKING b
-JOIN [USER] u ON b.requester_id = u.user_id
-JOIN SPACE  s ON b.space_code   = s.space_code
-WHERE b.booking_status = 'Pending'
-  AND b.requested_start BETWEEN GETDATE() AND DATEADD(DAY, 1, GETDATE())
-ORDER BY b.requested_start;
+JOIN SPACE s ON b.space_code = s.space_code
+WHERE b.booking_status IN ('Pending', 'Approved', 'Checked In', 'Completed')
+ORDER BY capacity_utilization_pct DESC;
 GO
+
+/*
+Sample Output (verified against Step 6 data):
+booking_id  space_name          capacity  expected_participants  capacity_utilization_pct  purpose      booking_status
+----------  ------------------  --------  ---------------------  --------------------------  -----------  --------------
+         3  Lecture Room 201          60                     50                       83.33  Lecture      Completed
+        12  Project Lab Alpha         30                     25                       83.33  Workshop     Checked In
+         6  Main Auditorium          200                    150                       75.00  Examination  Checked In
+         2  Meeting Room 301          20                     15                       75.00  Seminar      Approved
+         1  Lecture Room 201          60                     40                       66.67  Lecture      Pending
+*/
 
 /*
 Sample Output:
