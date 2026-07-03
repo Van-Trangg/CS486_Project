@@ -435,7 +435,7 @@ SELECT
     m.maintenance_status,
     m.start_time,
     m.completion_time,
-DATEDIFF(DAY,nm.start_time,ISNULL(m.completion_time, GETDATE())) AS maintenance_days
+DATEDIFF(DAY,m.start_time,ISNULL(m.completion_time, GETDATE())) AS maintenance_days
 FROM MAINTENANCERECORD m
 JOIN SPACE s ON m.space_code = s.space_code
 WHERE m.maintenance_status IN ('Reported', 'In Progress')
