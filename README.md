@@ -127,6 +127,8 @@ Run the custom command:
 
 ```text
 /design-db req/business-requirement.md
+/step2
+/design-step3
 ```
 
 If your group uses a different command name, update this README with the correct command.
