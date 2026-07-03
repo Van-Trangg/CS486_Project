@@ -156,7 +156,7 @@ The relationships established between entities are detailed below.
    - *Business Meaning:* A physical space is reserved for multiple scheduled bookings. Each booking request is for exactly one physical space.
 4. **Space Contains Facility Mapping (`Space_Equipped_With_Facility`)**
    - *Participating Entities:* `Space` (0,M) : (0,N) `Facility`
-   - *Business Meaning:* A sp5
+   - *Business Meaning:* A space may contain zero or multiple facility types, and a facility type may be available in multiple spaces.
 5. **Booking Tracked by Usage Session (`Booking_Has_UsageSession`)**
    - *Participating Entities:* `Booking` (0,1) : (1,1) `UsageSession` 
    - *Business Meaning:* An approved booking has at most one physical usage session tracking actual entry and exit. A usage session corresponds to exactly one specific booking request.
