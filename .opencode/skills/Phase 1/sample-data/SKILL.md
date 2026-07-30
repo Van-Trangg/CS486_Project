@@ -93,8 +93,6 @@ Before writing any INSERT, define and record the consistency rules that apply to
 - **Conflict prevention rules:** Any business rule in the BRA that prevents two records from overlapping or conflicting (e.g., double-booking prevention) must be honoured in the data.
 - **Capacity or limit rules:** Any numeric constraint described in the BRA (e.g., participant count ≤ room capacity) must be satisfied.
 - **Lifecycle Consistency:** If a parent table has a status column where a specific value logically implies that no further action can occur (e.g., 'Cancelled', 'No-Show', 'Rejected', 'Closed'), then any child table that records subsequent steps MUST NOT contain a row referencing that parent. The agent must derive such implications from the business rules in the BRA.
-- **Bookings:** All seeded Bookings with status "Completed" must have a corresponding `USAGE_SESSION` entry to simulate a booking that had previously been approved, taken place and marked for completion.
-
 
 Apply all of these when writing data. Do not insert any row that violates them.
 
@@ -262,10 +260,7 @@ The following issues were identified during real execution of this skill on the 
 
 **Problem:** A trigger defined in the DDL may enforce a business rule using `RAISERROR ... ROLLBACK` on INSERT, making it impossible to insert sample rows that represent a later lifecycle stage.
 
-*Example from CS486:* `TR_USAGESESSION_CHECK_BOOKING_STATUS` rejects USAGESESSION inserts unless the referenced booking has `booking_status = 'Approved'`. This blocks USAGESESSION rows for bookings at the `'Checked In'` or `'Completed'` stage. However, a completed booking should logically have a corresponding usage session. To work around this constraint while keeping the data semantically correct:
-1. Insert the booking with `booking_status = 'Approved'`.
-2. Insert the matching `USAGESESSION` row(s) with the required check‑in / check‑out details.
-3. Afterwards, update the booking’s status to `'Completed'`.
+*Example from CS486:* `TR_USAGESESSION_CHECK_BOOKING_STATUS` rejects USAGESESSION inserts unless the referenced booking has `booking_status = 'Approved'`. This blocks USAGESESSION rows for bookings at the `'Checked In'` or `'Completed'` stage.
 
 **Mitigation — General approach:**
 
