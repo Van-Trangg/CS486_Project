@@ -19,7 +19,7 @@ A staff member reviewing a pending request has no way to know, at the moment the
 
 Therefore, the concurrency design must uniformly prevent collisions for all three pairings (instant/instant, staff/staff, instant/staff), rather than prioritizing the staff path as the only risk.
 
-The concurrency problem described above is a **phantom-insert / check-then-act race**, not a lost-update. The two transactions never touch the same existing row, where each is inserting or updating a *different* `BOOKING` row. Rather, it involves two transactions each acting on a **different** `BOOKING` row that has not yet been inserted, where neither transaction's write is aware of the other row's version.
+The concurrency problem described above is a **phantom-insert / check-then-act race**, not a lost-update. The two transactions never touch the same existing row. Rather, it involves two transactions each acting on a **different** `BOOKING` row that has not yet been inserted, where neither transaction's write is aware of the other row's version.
 
 ---
 
