@@ -71,7 +71,7 @@ A second race exists between booking approval and maintenance escalation, distin
 1. Session A (approval) locks/checks the space and is about to approve a booking.
 2. Session B (maintenance escalation) raises the space's maintenance impact level from `Advisory` to `Out-of-Service`.
 3. Session B does not see Session A's booking, since A has not yet committed.
-4. Session A commits its approval, unaware that the space has just been marked `Out-of-Service`. The result is an approved booking sitting inside a maintenance blackout window. Meanwhile, because it was approved after Session B already built its affected-bookings list, that booking never gets flagged as affected.
+4. Session A commits its approval, unaware that the space has just been marked `Out-of-Service`. Because the booking was approved after Session B had already built its affected-bookings list, it never gets flagged as affected.
 
 **Decision:** Any operation that escalates a space's maintenance impact level to `Out-of-Service` must acquire the same per-space update lock (Section 3) before changing the impact level and identifying affected bookings. This serializes maintenance escalation with booking approval on a given space:
 - If approval runs first, escalation waits, then sees the newly approved booking and includes it in the affected bookings list.
