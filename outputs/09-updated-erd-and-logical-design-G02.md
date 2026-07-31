@@ -44,11 +44,21 @@ In accordance with Step 8 §11 (Open Questions) and Step 9 guidelines for contro
 * **Rationale:** To support future concurrency control (CC-01 through CC-03) during simultaneous instant and staff booking approvals, adding a native `ROWVERSION` column to `BOOKING` provides database-level version tracking. This column automatically updates upon any modifications to a booking record.
 * **Scope Boundary Confirmation:** This schema addition provides structural data support only. No locking hints, transaction isolation levels, triggers, or procedural concurrency mechanisms are implemented in Step 9; those are strictly reserved for Steps 11–13 per Step 8 §9.
 
+### Decision 5: Semester Scope Representation
+* **Quoted Open Question (Step 8 §11 Row 1):** *"What defines a semester: supplied start/end parameters, a maintained academic-calendar entity, or another authoritative source?"*
+* **Chosen Representation:** Treat semester boundaries as report input parameters (`@semester_start DATETIME`, `@semester_end DATETIME`) in analytical queries (Reports 1 and 2), rather than introducing a stored `ACADEMIC_CALENDAR` or `SEMESTER` table into the relational schema.
+* **Rationale:** Phase 2 BRA §1.3 asks for reports "for a given semester" but does not define or require a persistent academic calendar table. Supplying date parameters avoids adding ungrounded administrative entities to the database schema while providing complete flexibility for any semester date range.
+* **Traceability & Step 8 Alignment:** Adheres directly to Step 8 §11 Working Assumption 1.
+
+### Decision 6: Active Advisory Status Scope
+* **Quoted Open Question (Step 8 §11 Row 5):** *"Does 'active advisory at booking time' include maintenance in Reported and In Progress only, as Phase 1 treated active maintenance, or another status/time definition?"*
+* **Chosen Representation:** Active advisories subject to disclosure and acknowledgement at booking time are defined as `MAINTENANCERECORD` rows where `maintenance_status IN ('Reported', 'In Progress')` AND `impact_level = 'advisory'` AND the requested booking period overlaps the maintenance period.
+* **Rationale:** Preserves consistency with Phase 1 baseline logic where active maintenance is represented by open statuses (`Reported`, `In Progress`), while filtering specifically for `impact_level = 'advisory'` per P2-BR-02/03.
+* **Traceability & Step 8 Alignment:** Adheres directly to Step 8 §11 Working Assumption 5 and P2-BR-03.
+
 ---
 
 ## 3. Updated Entity-Relationship Diagram
-
-The complete updated Entity-Relationship Diagram is rendered below using Mermaid `erDiagram` syntax in Crow's Foot notation. Unchanged entities and relationships retain their Phase 1 baseline structure and BRA section comments. All new or modified entity blocks and relationship lines are annotated with their corresponding Step 8 Change IDs.
 
 ```mermaid
 erDiagram
@@ -170,21 +180,19 @@ erDiagram
     %% BRA §5.10 — User_Assigned_To_Maintenance
     USER o{--o| MAINTENANCERECORD : "assigned to"
     %% C08-02 — Booking_Acknowledges_Advisory
-    BOOKING ||--o{ BOOKING_ADVISORY_ACK : "acknowledges"
+    BOOKING o{--|| BOOKING_ADVISORY_ACK : "acknowledges"
     %% C08-02 — Maintenance_Disclosed_In_Ack
-    MAINTENANCERECORD ||--o{ BOOKING_ADVISORY_ACK : "disclosed in"
+    MAINTENANCERECORD o{--|| BOOKING_ADVISORY_ACK : "disclosed in"
     %% C08-03 — Maintenance_Has_Impact_History
-    MAINTENANCERECORD ||--o{ MAINTENANCE_IMPACT_HISTORY : "tracks changes"
+    MAINTENANCERECORD o{--|| MAINTENANCE_IMPACT_HISTORY : "tracks changes"
     %% C08-03 — User_Changes_Maintenance_Impact
     USER o{--|| MAINTENANCE_IMPACT_HISTORY : "changed by"
 ```
-
+ 
 ---
-
+ 
 ## 4. Relationship Delta Summary
-
-The following table summarizes all 14 relationships in the updated conceptual model, detailing cardinality, status relative to Phase 1, and traceability:
-
+ The following table summarizes all 14 relationships in the updated conceptual model, detailing cardinality, status relative to Phase 1, and traceability:
 | # | Relationship Name | Entity A | Cardinality | Entity B | Status | Traces To | Notes |
 |---|---|---|---|---|---|---|---|
 | 1 | User_Requests_Booking | USER | (0,N) : (1,1) | BOOKING | UNCHANGED | BRA §5.1 | User submits booking request |
@@ -197,11 +205,11 @@ The following table summarizes all 14 relationships in the updated conceptual mo
 | 8 | Space_Requires_Maintenance | SPACE | (0,N) : (1,1) | MAINTENANCERECORD | UNCHANGED | BRA §5.8 | Space requires maintenance |
 | 9 | User_Reports_Maintenance | USER | (0,N) : (1,1) | MAINTENANCERECORD | UNCHANGED | BRA §5.9 | User reports maintenance issue |
 | 10 | User_Assigned_To_Maintenance | USER | (0,N) : (0,1) | MAINTENANCERECORD | UNCHANGED | BRA §5.10 | Staff assigned to maintenance task |
-| 11 | Booking_Acknowledges_Advisory | BOOKING | (0,N) : (1,1) | BOOKING_ADVISORY_ACK | NEW | Change ID C08-02 (P2-BR-03) | Booking acknowledges disclosed advisory |
-| 12 | Maintenance_Disclosed_In_Ack | MAINTENANCERECORD | (0,N) : (1,1) | BOOKING_ADVISORY_ACK | NEW | Change ID C08-02 (P2-BR-03) | Advisory maintenance record disclosed in acknowledgement |
-| 13 | Maintenance_Has_Impact_History | MAINTENANCERECORD | (0,N) : (1,1) | MAINTENANCE_IMPACT_HISTORY | NEW | Change ID C08-03 (P2-BR-05/06) | Maintenance record impact changes tracked |
-| 14 | User_Changes_Maintenance_Impact | USER | (0,N) : (1,1) | MAINTENANCE_IMPACT_HISTORY | NEW | Change ID C08-03 (P2-BR-05/06) | Staff/Manager alters maintenance impact level |
-
+| 11 | Booking_Acknowledges_Advisory | BOOKING | (0,N) : (1,1) | BOOKING_ADVISORY_ACK | NEW | Change ID C08-02 (P2-BR-03) | A booking may have zero or many advisory acknowledgements; each acknowledgement belongs to exactly one booking (`booking_id NOT NULL FK`) |
+| 12 | Maintenance_Disclosed_In_Ack | MAINTENANCERECORD | (0,N) : (1,1) | BOOKING_ADVISORY_ACK | NEW | Change ID C08-02 (P2-BR-03) | An advisory maintenance record may be disclosed in zero or many acknowledgements; each acknowledgement discloses exactly one maintenance record (`maintenance_id NOT NULL FK`) |
+| 13 | Maintenance_Has_Impact_History | MAINTENANCERECORD | (0,N) : (1,1) | MAINTENANCE_IMPACT_HISTORY | NEW | Change ID C08-03 (P2-BR-05/06) | A maintenance record may have zero or many impact-change history entries; each entry belongs to exactly one maintenance record (`maintenance_id NOT NULL FK`) |
+| 14 | User_Changes_Maintenance_Impact | USER | (0,N) : (1,1) | MAINTENANCE_IMPACT_HISTORY | NEW | Change ID C08-03 (P2-BR-05/06) | A user may make zero or many impact changes; each history entry records exactly one changing user (`changed_by_user_id NOT NULL FK`) |
+ 
 ---
 
 ## 5. Updated Logical Schema

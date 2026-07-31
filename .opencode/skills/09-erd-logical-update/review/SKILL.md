@@ -81,7 +81,7 @@ This check has two parts. Part (a) covers entities/tables untouched by any Chang
 **Procedure:**
 For every new entity, attribute, or relationship in the Step 9 ERD/schema that does not exist in the Phase 1 baseline:
 1. Confirm it traces to either a Change Ledger row or a Stage-1-style resolution documented in §2 of the output.
-2. Flag any new element with no traceability — this is an invention violation, the mirror image of Step 2 Check 1's invention rule, and just as serious.
+2. Flag any new element with no traceability — an invention violation just as serious as a missing change.
 
 **Pass condition:** Every new structural element has a stated justification. Zero unexplained additions.
 
@@ -126,18 +126,26 @@ For each relationship line marked NEW or MODIFIED in the Step 9 output's Relatio
 
 **Token disambiguation rule:** the token immediately adjacent to `--` (touching the dashes) belongs to the entity on that side. The character further from `--` indicates the minimum participation (`o` = optional/zero, `\|` = mandatory/one); the character closest to the entity name indicates multiplicity (`{`/`}` = many, `\|` = one).
 
-**Critical direction rule:** in a line of the form `ENTITY_A token--token ENTITY_B`, the **left token** describes ENTITY_A's cardinality as seen from ENTITY_B's perspective, and the **right token** describes ENTITY_B's cardinality as seen from ENTITY_A's perspective. Example: `USER ||--o{ BOOKING` → USER side `||` = (1,1); BOOKING side `o{` = (0,N) — every Booking must have exactly 1 User; a User may have 0-or-many Bookings.
+**Critical direction rule:** in a line of the form `ENTITY_A token--token ENTITY_B`, the token immediately next to `ENTITY_A` describes **ENTITY_A's own participation** in the relationship — how many instances of ENTITY_B a single ENTITY_A instance may relate to. Likewise the token next to `ENTITY_B` describes ENTITY_B's own participation. Example: `USER o{--|| BOOKING` → USER token `o{` = (0,N) is USER's own cardinality (one user may submit zero to many bookings); BOOKING token `||` = (1,1) is BOOKING's own cardinality (every booking requires exactly one user). Do NOT read the token next to an entity as a constraint imposed by the *other* entity — it is always that entity's own participation count, full stop.
+
+**Independent-derivation rule (mandatory):** "Decoded" and "Expected" must come from two separate reads, not one:
+- **Decoded A/B** is derived *only* by reading the literal crow's-foot token printed in the Step 9 Mermaid ERD line under review, and translating it via the decoding reference table above. The reviewer does not consult Step 8 or the §2 resolutions while doing this step.
+- **Expected A/B** is derived *only* by reading the Step 8 §5 relationship text, the relevant §2 open-question resolution, or (for a foreign-key–driven new entity) the `NOT NULL`/nullable status of the FK column in the Step 9 output's §5 schema — never by reading the ERD's own token and echoing it back. The reviewer does not look at the diagram while doing this step.
+- The **Expected A/B** column must contain a short quoted or closely paraphrased fragment of the source it was derived from, plus a citation (a Step 8 section number, a §2 resolution number, or the specific FK column and its nullability, e.g. "`booking_id NOT NULL FK` in §5.2.1 → ACK is the mandatory-single side"). A bare cardinality pair with no source fragment is an incomplete row and fails Check 6 on formality grounds alone, because it cannot be distinguished from a token copied out of the diagram.
+- Only after both columns are independently filled does the reviewer compare them and mark Match? YES/NO.
 
 **Strict Match equality rule:** the Match column is YES if and only if the decoded value is character-for-character identical to the expected value. If decoded is `(1,N)` and expected is `(0,N)`, the match is NO — even if the relationship "looks right" from the label or context. A reviewer who writes YES where the values differ has made a verification error, invalidating the entire Check 6 result.
 
 The reviewer must dynamically generate and fill out this table for every NEW/MODIFIED relationship before issuing a verdict:
 
-| # | Relationship | ERD Left Token | Decoded A | Expected A (Step 8 §5 / §2 resolution) | Match? | ERD Right Token | Decoded B | Expected B | Match? |
+| # | Relationship | ERD Left Token | Decoded A | Expected A (quoted/paraphrased source + citation) | Match? | ERD Right Token | Decoded B | Expected B (quoted/paraphrased source + citation) | Match? |
 |---|---|---|---|---|---|---|---|---|---|
 
-**Pass condition:** All new/changed relationships match their derived cardinalities. Any `(0,1)` vs `(1,1)` confusion is a FAIL.
+**Pass condition:** All new/changed relationships match their derived cardinalities, with every Expected cell independently sourced and cited as above. Any `(0,1)` vs `(1,1)` confusion is a FAIL.
 
-*Anti-rubber-stamp rule: if this table is missing or empty for any NEW/MODIFIED relationship, the review is invalid.*
+**No-repair rule (mandatory):** The reviewer is a validator, not a co-author. If Decoded and Expected do not match, the correct action is to mark that row **Match? NO**, mark Check 6 **FAIL**, and add a BLOCKING item to "Required Changes Before Step 10" describing exactly what the Step 9 output's ERD line currently says and what it must be changed to. The reviewer must never edit, "correct," or silently update the Mermaid diagram, the relationship table, or any other part of the artifact under review as part of running this check — doing so and then reporting PASS is a fabricated verdict, not a review, regardless of whether the correction the reviewer made was itself accurate. A review report containing any note describing an in-place correction made "during review" (e.g. "was updated during review from X to Y") is invalid on its face and must be rejected — the corrected artifact has to come back from a re-run of the Step 9 design skill, not from the reviewer's own edit.
+
+*Anti-rubber-stamp rule: if this table is missing, empty, or has any Expected cell without a quoted/paraphrased source citation for any NEW/MODIFIED relationship, the review is invalid.*
 
 ---
 
@@ -167,7 +175,7 @@ Parse the full updated Mermaid block for these syntax errors and formatting viol
 
 Additionally, for Step 9 specifically:
 - Every NEW/MODIFIED entity block and relationship line must carry its own `%%` comment citing a Change ID.
-- Every UNCHANGED entity block and relationship line must retain its original Step 2 BRA-section comment, unaltered.
+- Every UNCHANGED entity block and relationship line must retain its original BRA-section comment exactly as it appears in the Phase 1 baseline (`02-erd-design-G02.md`), unaltered.
 
 **Pass condition:** No syntax violations of any rule above; all new/changed elements traceable via comment to a Change ID; all unchanged elements retain original citations. Any inline comment on an attribute or relationship line is an automatic FAIL for this check.
 
@@ -262,13 +270,13 @@ If the verdict is REQUIRES REVISION, the agent must:
 2. Produce a corrected updated-ERD/schema section with all blocking issues resolved.
 3. Re-run checks 1–8 on the corrected version and confirm all blocking issues are resolved.
 
-**Anti-rubber-stamp rule:** An APPROVED verdict is only valid if the reviewer has explicitly shown its work for Check 6 (the decoding table for every NEW/MODIFIED relationship must be present) and has performed the full element-by-element comparison for both Check 3a (unaffected entities/tables) and Check 3b (column-level diff on every modified table) rather than a spot check of either. A verdict issued without all three pieces of shown work is invalid and must be rejected. Passing 3a alone, with 3b skipped on the theory that "the table is already flagged as modified," is itself a rubber-stamp failure.
+**Anti-rubber-stamp rule:** An APPROVED verdict is only valid if the reviewer has explicitly shown its work for Check 6 (the decoding table for every NEW/MODIFIED relationship must be present, with every Expected cell independently sourced and cited — never derived from the diagram itself) and has performed the full element-by-element comparison for both Check 3a (unaffected entities/tables) and Check 3b (column-level diff on every modified table) rather than a spot check of either. A verdict issued without all three pieces of shown work is invalid and must be rejected. Passing 3a alone, with 3b skipped on the theory that "the table is already flagged as modified," is itself a rubber-stamp failure. Likewise, a verdict is invalid if the reviewer edited the artifact under review to force a match instead of reporting a mismatch as a BLOCKING correction.
 
 ---
 
 ## 6. Reviewer Stance
 
-The reviewer must treat Step 8 as the authoritative scope document and the Phase 1 baseline as the authoritative "do not touch without cause" document — analogous to how the Step 2 reviewer treated the BRA as sole ground truth, but split across two roles here: Step 8 says *what* may change, Phase 1 says *what must not*.
+The reviewer must treat Step 8 as the authoritative scope document and the Phase 1 baseline as the authoritative "do not touch without cause" document: Step 8 says *what* may change, Phase 1 says *what must not*.
 
 The reviewer must not:
 - Accept an unresolved open question because "the intent is clear from context."
@@ -278,5 +286,7 @@ The reviewer must not:
 - Approve any output with a BLOCKING issue, regardless of how minor it appears.
 - Skip Check 3b on a modified table because the table is "already accounted for" in the Change Ledger — a table having one legitimate change does not vouch for its other columns.
 - Accept a §6 Attribute Traceability row at face value without confirming the cited Change ID or Stage 1 resolution actually justifies that specific attribute.
+- Edit, patch, or "correct" the Step 9 artifact under review as part of performing any check, then report the corrected state as if it were what the artifact already contained. The reviewer's role ends at producing findings and BLOCKING correction instructions; making the artifact match its own findings and calling that a PASS is a fabricated verdict, not a review. This applies to every check, not only Check 6 — a reviewer that silently fixes a Change Ledger gap, adds a missing traceability row, or renames a column back to its baseline value has stopped reviewing and started ghostwriting the artifact it is supposed to be independently validating.
+- Derive an "Expected" value in Check 6 (or any similar decode-and-compare check) by reading the artifact's own output rather than the independent source — this collapses the comparison into a tautology and guarantees a match regardless of correctness.
 
 The reviewer must be constructive: every FAIL or WARN finding includes a specific, actionable correction instruction, not just a description of what is wrong.
