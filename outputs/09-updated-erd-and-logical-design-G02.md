@@ -210,11 +210,6 @@ erDiagram
 | 13 | Maintenance_Has_Impact_History | MAINTENANCERECORD | (0,N) : (1,1) | MAINTENANCE_IMPACT_HISTORY | NEW | Change ID C08-03 (P2-BR-05/06) | A maintenance record may have zero or many impact-change history entries; each entry belongs to exactly one maintenance record (`maintenance_id NOT NULL FK`) |
 | 14 | User_Changes_Maintenance_Impact | USER | (0,N) : (1,1) | MAINTENANCE_IMPACT_HISTORY | NEW | Change ID C08-03 (P2-BR-05/06) | A user may make zero or many impact changes; each history entry records exactly one changing user (`changed_by_user_id NOT NULL FK`) |
  
-| 11 | Booking_Acknowledges_Advisory | BOOKING | (0,N) : (1,1) | BOOKING_ADVISORY_ACK | NEW | Change ID C08-02 (P2-BR-03) | A booking may have zero or many advisory acknowledgements; each acknowledgement belongs to exactly one booking (`booking_id NOT NULL FK`) |
-| 12 | Maintenance_Disclosed_In_Ack | MAINTENANCERECORD | (0,N) : (1,1) | BOOKING_ADVISORY_ACK | NEW | Change ID C08-02 (P2-BR-03) | An advisory maintenance record may be disclosed in zero or many acknowledgements; each acknowledgement discloses exactly one maintenance record (`maintenance_id NOT NULL FK`) |
-| 13 | Maintenance_Has_Impact_History | MAINTENANCERECORD | (0,N) : (1,1) | MAINTENANCE_IMPACT_HISTORY | NEW | Change ID C08-03 (P2-BR-05/06) | A maintenance record may have zero or many impact-change history entries; each entry belongs to exactly one maintenance record (`maintenance_id NOT NULL FK`) |
-| 14 | User_Changes_Maintenance_Impact | USER | (0,N) : (1,1) | MAINTENANCE_IMPACT_HISTORY | NEW | Change ID C08-03 (P2-BR-05/06) | A user may make zero or many impact changes; each history entry records exactly one changing user (`changed_by_user_id NOT NULL FK`) |
- 
 ---
 
 ## 5. Updated Logical Schema
