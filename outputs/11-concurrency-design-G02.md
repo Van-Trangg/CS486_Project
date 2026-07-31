@@ -27,10 +27,10 @@ This is a **phantom-insert / check-then-act race**, not a lost-update: the two t
 ### Option A: Default (Read Committed) Locking (Rejected)
 Row-level shared locks are released as soon as the availability-check read completes, before the transaction's own insert/approval commits. This does not address the main concurrency problem of to-be-inserted rows.
 
-*Note:* Step 9 (Decision 4)'s `row_version` on `BOOKING` also similarly only solves **lost updates** 
+*Note:* Step 9 (Decision 4)'s `row_version` on `BOOKING` addresses lost updates, not phantom-insert conflicts.
 
-### Option B: Per-Space Exclusive Locking (Strict 2PL) (Selected)
-Lock the **space**, not a time range: any operation that could result in an approved booking for a given `space_code` must acquire an exclusive lock on the corresponding `SPACE` row (`WITH (UPDLOCK, HOLDLOCK)`) before re-checking overlap and recording its own result.
+### Option B: Per-Space Update Locking (Strict 2PL) (Selected)
+Lock the **space**, not a time range: any operation that could result in an approved booking for a given `space_code` must acquire a transaction-held update lock on the corresponding `SPACE` row (`WITH (UPDLOCK, HOLDLOCK)`) before re-checking overlap and recording its own result. Only one transaction can hold a U lock on a given resource at a time, so a second session is forced to wait. `HOLDLOCK` keeps that lock held for the duration of the transaction rather than releasing it as soon as the read completes.
 
 Every approval attempt for the same space is serialized against every other attempt for that space, regardless of approval path; a second session waits until the first commits or rolls back, then performs its own fresh check. Approvals for different spaces run concurrently, unaffected.
 
@@ -43,7 +43,7 @@ SQL Server has no native range-exclusion constraint. An `AFTER INSERT, UPDATE` t
 
 ## 3. Selected Concurrency Control Strategy
 
-**Decision:** Every operation that can result in an approved booking (instant approval, staff approval, or any future administrative approval) acquires an exclusive per-space lock, then re-checks overlap, then records its result, all inside one short transaction (Section 4).
+**Decision:** Every operation that can result in an approved booking (instant approval, staff approval, or any future administrative approval) acquires a per-space update lock, then re-checks overlap, then records its result, all inside one short transaction (Section 4). The same per-space lock is also acquired by maintenance escalation to `Out-of-Service` (Section 5), so the two kinds of operations are serialized against each other as well as against themselves.
 
 **Rationale:**
 - Directly closes the check-then-act race for all three pairings, uniformly, because the lock is keyed to the space, not to a specific query shape.
@@ -54,7 +54,7 @@ SQL Server has no native range-exclusion constraint. An `AFTER INSERT, UPDATE` t
 
 ## 4. Locking Scope and Approval Workflow
 
-The lock-and-recheck sequence in Section 3 is enforced through a single stored procedure, `sp_ApproveBooking`, which is the only path by which a booking may reach `Approved` status. Instant approval at submission, facility-staff approval, facility-manager approval, and any future administrative approval path all call this same procedure; a direct `UPDATE BOOKING SET booking_status = 'Approved'` outside it is not permitted, since any path that bypasses the procedure also bypasses the locking design in Section 3.
+The lock-and-recheck sequence in Section 3 is enforced through a single stored procedure, `sp_ApproveBooking`, which is the only path by which a booking may reach `Approved` status. Instant approval at submission, facility-staff approval, facility-manager approval, and any future administrative approval path all call this same procedure. Application and workflow accounts must not have permission to approve a booking through a direct table update, they must execute `sp_ApproveBooking`. Any path that bypasses the procedure also bypasses the locking design in Section 3.
 
 This gives the design a clean boundary between the human workflow and the transactional one. A staff member may look at a space's availability at any point while a request sits `Pending`; that look is advisory and holds no lock. The transaction that matters is the one `sp_ApproveBooking` opens at the moment approval is actually recorded: acquire the space lock, recheck for conflicts, and commit. Keeping that transaction short and separate from the (arbitrarily long) human review period keeps the locking design in Section 3 correct without ever holding a lock across a review that could take minutes or hours.
 
@@ -64,4 +64,21 @@ The procedure's exact body, the overlap predicate, and error-handling code are i
 
 ---
 
-The demonstration scripts and two-session test cases proving this design closes the race are implemented in Step 13.
+## 5. Interaction with Maintenance Escalation
+
+A second race exists between booking approval and maintenance escalation, distinct from the phantom-insert race in Section 1 but closed by the same mechanism:
+
+1. Session A (approval) locks/checks the space and is about to approve a booking.
+2. Session B (maintenance escalation) raises the space's maintenance impact level from `Advisory` to `Out-of-Service`.
+3. Session B does not see Session A's booking, since A has not yet committed.
+4. Session A commits its approval, unaware that the space has just been marked `Out-of-Service`. The result is an approved booking sitting inside a maintenance blackout window. Meanwhile, because it was approved after Session B already built its affected-bookings list, that booking never gets flagged as affected.
+
+**Decision:** Any operation that escalates a space's maintenance impact level to `Out-of-Service` must acquire the same per-space update lock (Section 3) before changing the impact level and identifying affected bookings. This serializes maintenance escalation with booking approval on a given space:
+- If approval runs first, escalation waits, then sees the newly approved booking and includes it in the affected bookings list.
+- If escalation runs first, approval waits, then sees the `Out-of-Service` status and does not approve.
+
+Because both operation types lock the same `SPACE` row, no second locking scheme is needed. The per-space lock now serializes every operation that reads or write a space's booking/availability state, not only approvals against each other.
+
+---
+
+The procedure(s) implementing this locking discipline, the overlap predicate, and error-handling code are implemented in Step 12. The demonstration scripts and two-session test cases proving this design closes both races are implemented in Step 13.
