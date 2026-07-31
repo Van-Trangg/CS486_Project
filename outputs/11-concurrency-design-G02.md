@@ -8,57 +8,60 @@
 
 **Quoted requirement:** *"Because users and staff may perform booking operations concurrently, multiple operations may check the availability of the same space before any of them records its result. Without appropriate concurrency control, conflicting bookings may be approved."* The BRA further requires: *"The system must ensure that two approved bookings cannot use the same space during overlapping time periods, regardless of whether the bookings are created through instant-booking or staff approval."*
 
-**The two approval paths involved:** Step 9 (Decision 3) introduced `BOOKING.approval_path` to distinguish two ways a booking reaches `Approved` status. On the **instant-booking path**, a request for a qualifying space type that satisfies usage policy is approved automatically at submission time, with no staff involvement and effectively no delay between the availability check and the approval being recorded. On the **staff approval path**, a request stays `Pending` until a facility staff member reviews it, leaving a gap between "availability was checked" and "approval is recorded" that can span minutes or hours long, enabling the following situation to occur:
+**The two approval paths involved:** Step 9 (Decision 3) introduced `BOOKING.approval_path` to distinguish an **instant-booking path** (approved automatically at submission, no staff involvement) from a **staff approval path** (request stays `Pending` until a staff member decides). Both paths can produce the same race:
 
-**Phantom-insert:**
-1. Session A (either path) queries `BOOKING` for existing rows where `space_code = X` and `booking_status = 'Approved'` with a time range overlapping the new request. No conflicting row is found.
-2. Before Session A commits its own approval, Session B performs the identical check for the same space and an overlapping time window. Under default read-committed isolation, Session B's read is not blocked by Session A's uncommitted work. It also finds no conflicting row.
-3. Both sessions proceed to approve/insert their respective bookings. Both commit. The space now has two approved, time-overlapping bookings, a direct violation of the Phase 1 baseline rule and the Phase 2 concurrency requirement.
+1. Session A queries `BOOKING` for existing `Approved` rows on `space_code = X` overlapping the new request's time range. No conflict found.
+2. Before Session A commits, Session B performs the identical check for the same space and an overlapping window. Under read-committed isolation, Session B is not blocked by Session A's uncommitted work and also finds no conflict.
+3. Both sessions approve/insert. Both commit. The space now has two approved, overlapping bookings, a violation of the Phase 1 baseline rule and the Phase 2 concurrency requirement.
 
-A staff member reviewing a pending request has no way to know, at the moment they check availability, whether an instant-booking request for an overlapping slot on the same space is being submitted at that same moment. Since staff-approved bookings operating window is human-paced, it likely stays open far longer than the instant-booking path's window, resulting in a high probability of collision in practice. The conflict also applies to both paths individually: two long windows of staff-approved bookings can easily overlap, while the possiblity of two instant bookings being requested at the same time always exists.
+This is a **phantom-insert / check-then-act race**, not a lost-update: the two transactions each act on a *different*, not-yet-inserted `BOOKING` row, so no shared row's version is ever compared.
 
-Therefore, the concurrency design must uniformly prevent collisions for all three pairings (instant/instant, staff/staff, instant/staff), rather than prioritizing the staff path as the only risk.
+**The gap exists for all three pairings:** instant/instant, staff/staff, and instant/staff, regardless of how long the gap between check and decision happens to be in practice. The design below must close it uniformly rather than treating the staff path as a special case.
 
-The concurrency problem described above is a **phantom-insert / check-then-act race**, not a lost-update. The two transactions never touch the same existing row. Rather, it involves two transactions each acting on a **different** `BOOKING` row that has not yet been inserted, where neither transaction's write is aware of the other row's version.
+**The concurrency problem lives at the moment of approval, not the moment of review.** A staff member can look at availability at any point while a request sits `Pending`, which is unrelated to the transaction the race takes place. What matters is the check performed the instant the booking is actually approved (see Section 4).
 
 ---
 
 ## 2. Candidate Mechanisms Considered
 
-### Option A: Default (Read Committed) Locking
-Standard row-level shared locks are released as soon as the availability-check read completes, before the transaction commits its own insert/approval. This is precisely the gap described in Section 1, so this option alone does not close the race window.
+### Option A: Default (Read Committed) Locking (Rejected)
+Row-level shared locks are released as soon as the availability-check read completes, before the transaction's own insert/approval commits. This does not address the main concurrency problem of to-be-inserted rows.
 
-**Note on Step 9 (Decision 4) previously proposed addition of `row_version` to `BOOKING`:** the mechanism also only resolves **lost updates**, which does not address the concurrency control requirement.
+*Note:* Step 9 (Decision 4)'s `row_version` on `BOOKING` also similarly only solves **lost updates** 
 
-### Option B: Strict 2-Phase Locking via `SERIALIZABLE` Isolation or `UPDLOCK, HOLDLOCK` Hints
-Wrapping the availability-check-then-insert/approve sequence in a single transaction under `SERIALIZABLE` isolation (or applying `WITH (UPDLOCK, HOLDLOCK)` to the availability-check query under a lower isolation level) causes SQL Server to take **range locks**, not just row locks, across the queried time/space key range. A second transaction attempting to check or insert into that same range is blocked until the first transaction commits or rolls back.
+### Option B: Per-Space Exclusive Locking (Strict 2PL) (Selected)
+Lock the **space**, not a time range: any operation that could result in an approved booking for a given `space_code` must acquire an exclusive lock on the corresponding `SPACE` row (`WITH (UPDLOCK, HOLDLOCK)`) before re-checking overlap and recording its own result.
 
-This is the standard application of **two-phase locking (2PL)**, specifically *strict* 2PL, which SQL Server implements natively under these isolation settings: locks are acquired during a growing phase and held until commit (the shrinking phase), preventing another transaction from observing or modifying the locked range in between. This addresses the insertion of conflicting row that does not exist yet at the time of the check. 
+Every approval attempt for the same space is serialized against every other attempt for that space, regardless of approval path; a second session waits until the first commits or rolls back, then performs its own fresh check. Approvals for different spaces run concurrently, unaffected.
 
-### Option C: Trigger-Based Prevention
-SQL Server has no native range-exclusion constraint (unlike PostgreSQL's `EXCLUDE`). An equivalent effect could be built with an `AFTER INSERT, UPDATE` trigger that re-validates no overlapping approved booking exists for the same space and rolls back the transaction if one is found. This provides a database-enforced backstop independent of application logic, but is harder to reason about and test in isolation (trigger recursion, nested transaction behavior, interaction with the approval workflow's own state transitions), and does not by itself close the check-then-act window if the offending check occurs outside the trigger's transaction. 
+This is standard strict 2PL: lock acquired in the growing phase, held to commit. It is simple to reason about and test because correctness depends only on the lock, not on how the overlap predicate is written or indexed.
+
+### Option C: Trigger-Based Prevention (Rejected as primary, worth revisiting as a backstop)
+SQL Server has no native range-exclusion constraint. An `AFTER INSERT, UPDATE` trigger that re-validates and rolls back on conflict is a possible additional defense layer, but harder to reason about in isolation (trigger recursion, nested transactions) and doesn't by itself close the check-then-act window.
 
 ---
 
 ## 3. Selected Concurrency Control Strategy
-Option A: **Rejected**
 
-Option B: **Selected**
-
-Option C: **Rejected as primary mechanism**, worth revisiting in Step 12 as an additional defense layer alongside Option B, but not a substitute for it.
-
-**Decision:**
-To address the concurrency problem described in Section 1, the database will adopt a locking strategy via `SERIALIZABLE` transaction isolation (or equivalent `UPDLOCK, HOLDLOCK` table hints). This will be applied to the combined availability-check-and-approve/insert sequence and scoped to the specific `space_code` and requested time range being evaluated.
+**Decision:** Every operation that can result in an approved booking (instant approval, staff approval, or any future administrative approval) acquires an exclusive per-space lock, then re-checks overlap, then records its result, all inside one short transaction (Section 4).
 
 **Rationale:**
-- Directly targets the check-then-act race named in Phase 2 BRA §1.2, for both the instant-booking and staff-approval paths (`BOOKING.approval_path`, Step 9 Decision 3), and for every combination of the two.
-- Range-locking behavior specifically closes the phantom-insert gap that ordinary row-level 2PL does not address.
-- Applies uniformly regardless of which approval path produced the conflicting attempt, satisfying the BRA's explicit requirement that the rule "remain valid even when multiple users or staff members perform booking and approval operations simultaneously."
-- Keeps `row_version` in place, unmodified, as the separate mechanism for its own narrower lost-update scenario. The two mechanisms are complementary, not competing.
+- Directly closes the check-then-act race for all three pairings, uniformly, because the lock is keyed to the space, not to a specific query shape.
+- Correctness comes from the lock and the fresh recheck it guards.
+- `row_version` stays in place unmodified for its own, separate lost-update scenario; the two mechanisms are complementary.
 
-**Implementation stage considerations:**
-- If `UPDLOCK, HOLDLOCK` is adopted rather than `SERIALIZABLE` transaction isolation, efficient key-range locks are only provided if there is a suitable index on `(space_code, time range)` to lock against. Without one, SQL Server may escalate to a full table/page lock. The booking-conflict index to be tuned later is the same index this concurrency mechanism depends on for correctness, not just performance.
-- It is also worth flagging that Strict 2PL with range locks can deadlock when two sessions lock overlapping ranges in different orders. Step 12's stored procedure should include a retry-on-deadlock (`TRY...CATCH` with error 1205) to handle this possibility.
+---
 
+## 4. Locking Scope and Approval Workflow
 
-In light of this proposed concurrency control design, the exact transaction/stored-procedure code implementing it is deferred to Step 12, while conflict/prevention demonstration scripts are deferred to Step 13.
+The lock-and-recheck sequence in Section 3 is enforced through a single stored procedure, `sp_ApproveBooking`, which is the only path by which a booking may reach `Approved` status. Instant approval at submission, facility-staff approval, facility-manager approval, and any future administrative approval path all call this same procedure; a direct `UPDATE BOOKING SET booking_status = 'Approved'` outside it is not permitted, since any path that bypasses the procedure also bypasses the locking design in Section 3.
+
+This gives the design a clean boundary between the human workflow and the transactional one. A staff member may look at a space's availability at any point while a request sits `Pending`; that look is advisory and holds no lock. The transaction that matters is the one `sp_ApproveBooking` opens at the moment approval is actually recorded: acquire the space lock, recheck for conflicts, and commit. Keeping that transaction short and separate from the (arbitrarily long) human review period keeps the locking design in Section 3 correct without ever holding a lock across a review that could take minutes or hours.
+
+Error handling follows from the same boundary: `sp_ApproveBooking` rolls back and surfaces a deadlock (error 1205) rather than retrying internally, so the transaction it owns stays short. Retrying the operation, as a whole, after a short delay, is left to the caller. This keeps retry policy separate from the locking mechanism and avoids masking repeated deadlocks inside the procedure.
+
+The procedure's exact body, the overlap predicate, and error-handling code are implemented in Step 12.
+
+---
+
+The demonstration scripts and two-session test cases proving this design closes the race are implemented in Step 13.
