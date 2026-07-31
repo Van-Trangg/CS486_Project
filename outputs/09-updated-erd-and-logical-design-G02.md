@@ -181,18 +181,14 @@ erDiagram
     USER o{--o| MAINTENANCERECORD : "assigned to"
     %% C08-02 — Booking_Acknowledges_Advisory
     BOOKING o{--|| BOOKING_ADVISORY_ACK : "acknowledges"
-    BOOKING o{--|| BOOKING_ADVISORY_ACK : "acknowledges"
     %% C08-02 — Maintenance_Disclosed_In_Ack
     MAINTENANCERECORD o{--|| BOOKING_ADVISORY_ACK : "disclosed in"
-    MAINTENANCERECORD o{--|| BOOKING_ADVISORY_ACK : "disclosed in"
     %% C08-03 — Maintenance_Has_Impact_History
-    MAINTENANCERECORD o{--|| MAINTENANCE_IMPACT_HISTORY : "tracks changes"
     MAINTENANCERECORD o{--|| MAINTENANCE_IMPACT_HISTORY : "tracks changes"
     %% C08-03 — User_Changes_Maintenance_Impact
     USER o{--|| MAINTENANCE_IMPACT_HISTORY : "changed by"
 ```
- 
- 
+
 ---
  
 ## 4. Relationship Delta Summary
