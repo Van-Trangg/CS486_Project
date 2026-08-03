@@ -46,11 +46,11 @@ Table modifications (Section 2) precede table creations (Section 3). Foreign key
 
 ### Check 4 — Idempotency & Re-run Safety
 **Result:** PASS  
-The script utilizes `COL_LENGTH('table', 'column') IS NULL` guards for column additions, `OBJECT_ID('constraint', 'C') IS NULL` guards for constraint additions, and `OBJECT_ID('table', 'U') IS NULL` guards for table creations. Re-running the script on an already-migrated database executes cleanly without throw errors.
+The script utilizes `COL_LENGTH('table', 'column') IS NULL` guards for column additions, `OBJECT_ID('constraint', 'C') IS NULL` guards for constraint additions, and `OBJECT_ID('table', 'U') IS NULL` guards for table creations. Re-running the script on an already-migrated database executes cleanly without errors.
 
 ### Check 5 — Transaction Safety & Exception Handling
 **Result:** PASS  
-Global execution is governed by `SET XACT_ABORT ON;`. DDL operations are grouped into explicit `BEGIN TRANSACTION` / `COMMIT TRANSACTION` blocks wrapped in `TRY...CATCH` logic with automatic `ROLLBACK TRANSACTION` and error propagation via `RAISERROR`.
+Global execution is governed by `SET XACT_ABORT ON;`. DDL operations are grouped into explicit `BEGIN TRANSACTION` / `COMMIT TRANSACTION` blocks wrapped in `TRY...CATCH` logic with automatic `ROLLBACK TRANSACTION` and error propagation via `RAISERROR`. Constraint additions and validation queries referencing newly added columns (`impact_level`, `approval_path`) use dynamic SQL (`EXEC`) within the transaction to defer T-SQL batch compilation until runtime after column creation.
 
 ### Check 6 — T-SQL Syntax & Data Type Precision
 **Result:** PASS  
@@ -58,7 +58,7 @@ All SQL Server data types match Step 9 specifications verbatim (`VARCHAR(20)`, `
 
 ### Check 7 — Post-Migration Validation Queries
 **Result:** PASS  
-Section 4 provides comprehensive verification queries querying T-SQL system catalog views (`sys.columns`, `sys.tables`, `sys.check_constraints`) as well as dynamic data aggregation checks (`GROUP BY` distributions) to validate column properties, table creation dates, active constraint statuses, and data backfill values post-migration.
+Section 4 provides comprehensive verification queries querying T-SQL system catalog views (`sys.columns`, `sys.tables`, `sys.check_constraints`) as well as dynamic data aggregation checks (`GROUP BY` distributions via dynamic SQL) to validate column properties, table creation dates, active constraint statuses, and data backfill values post-migration.
 
 ---
 

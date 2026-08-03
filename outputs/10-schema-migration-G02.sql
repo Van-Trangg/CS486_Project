@@ -62,9 +62,7 @@ BEGIN TRY
     IF OBJECT_ID('dbo.CK_MAINTENANCERECORD_IMPACT_LEVEL', 'C') IS NULL
     BEGIN
         PRINT 'Adding CHECK constraint [CK_MAINTENANCERECORD_IMPACT_LEVEL] to [MAINTENANCERECORD]...';
-        ALTER TABLE dbo.MAINTENANCERECORD
-            ADD CONSTRAINT CK_MAINTENANCERECORD_IMPACT_LEVEL
-                CHECK (impact_level IN ('advisory', 'out-of-service'));
+        EXEC('ALTER TABLE dbo.MAINTENANCERECORD ADD CONSTRAINT CK_MAINTENANCERECORD_IMPACT_LEVEL CHECK (impact_level IN (''advisory'', ''out-of-service''));');
     END;
 
     -- ------------------------------------------------------------
@@ -84,9 +82,7 @@ BEGIN TRY
     IF OBJECT_ID('dbo.CK_BOOKING_APPROVAL_PATH', 'C') IS NULL
     BEGIN
         PRINT 'Adding CHECK constraint [CK_BOOKING_APPROVAL_PATH] to [BOOKING]...';
-        ALTER TABLE dbo.BOOKING
-            ADD CONSTRAINT CK_BOOKING_APPROVAL_PATH
-                CHECK (approval_path IN ('Instant', 'Staff'));
+        EXEC('ALTER TABLE dbo.BOOKING ADD CONSTRAINT CK_BOOKING_APPROVAL_PATH CHECK (approval_path IN (''Instant'', ''Staff''));');
     END;
 
     IF COL_LENGTH('dbo.BOOKING', 'row_version') IS NULL
@@ -242,22 +238,12 @@ WHERE chk.name IN (
 -- 4.4 Verify Data Backfill Distribution on Pre-Existing Baseline Rows
 IF EXISTS (SELECT 1 FROM dbo.MAINTENANCERECORD)
 BEGIN
-    SELECT 
-        'MAINTENANCERECORD Backfill Check' AS verification_check,
-        impact_level,
-        COUNT(*) AS record_count
-    FROM dbo.MAINTENANCERECORD
-    GROUP BY impact_level;
+    EXEC('SELECT ''MAINTENANCERECORD Backfill Check'' AS verification_check, impact_level, COUNT(*) AS record_count FROM dbo.MAINTENANCERECORD GROUP BY impact_level;');
 END;
 
 IF EXISTS (SELECT 1 FROM dbo.BOOKING)
 BEGIN
-    SELECT 
-        'BOOKING Backfill Check' AS verification_check,
-        approval_path,
-        COUNT(*) AS record_count
-    FROM dbo.BOOKING
-    GROUP BY approval_path;
+    EXEC('SELECT ''BOOKING Backfill Check'' AS verification_check, approval_path, COUNT(*) AS record_count FROM dbo.BOOKING GROUP BY approval_path;');
 END;
 
 PRINT '============================================================';
