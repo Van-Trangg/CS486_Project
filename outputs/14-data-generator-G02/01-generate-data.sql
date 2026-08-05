@@ -56,8 +56,10 @@ BEGIN TRY
     PRINT 'All triggers disabled.';
 
     -- ============================================================
-    -- Section 2: Clean existing data (reverse FK dependency order)
+    -- Section 2: Clean existing data inside Transaction (R14-1 Fix)
     -- ============================================================
+    BEGIN TRANSACTION;
+
     PRINT 'Cleaning existing data...';
 
     IF OBJECT_ID('dbo.MAINTENANCE_IMPACT_HISTORY', 'U') IS NOT NULL DELETE FROM dbo.MAINTENANCE_IMPACT_HISTORY;
@@ -505,15 +507,18 @@ BEGIN TRY
                 ELSE 35 + (((n * 13) % (@bs_cnt - 35)) + 1)
             END AS space_rn,
 
-            -- Slot seq mapping:
-            -- Active bookings (n <= 77700): Strictly 1-to-1 unique slot_seq per space (NO WRAPAROUND!)
-            -- Inactive bookings (n > 77700): Target overlapping active slots for Rejected, or higher slots for others
+            -- Slot seq mapping (R14-4 fix):
+            -- Active bookings (n <= 77700): Strictly 1-to-1 unique slot_seq per space, scaled to span full 4,800+ slots across all 3 Academic Years!
+            -- Top 10: 3,500 active slots -> scaled by 1.37 (1..4795)
+            -- Mid 25: 1,200 active slots -> scaled by 4.0 (1..4797)
+            -- Low 17: 747 active slots -> scaled by 6.4 (1..4780)
+            -- Inactive bookings (n > 77700): Target active/available slots for realistic conflict testing
             CASE
-                WHEN n <= 35000 THEN ((n - 1) / 10) + 1                       -- slot_seq 1..3500 for Top 10
-                WHEN n <= 65000 THEN ((n - 35001) / 25) + 1                   -- slot_seq 1..1200 for Mid 25
-                WHEN n <= 77700 THEN ((n - 65001) / (@bs_cnt - 35)) + 1       -- slot_seq 1..747 for Low 17
-                WHEN n <= 88200 THEN ((n * 3) % 500) + 1                      -- Overlapping active slot for Rejected
-                ELSE 3501 + ((n * 5) % 1000)                                  -- Non-active slots
+                WHEN n <= 35000 THEN 1 + CAST((((n - 1) / 10) * 4800.0 / 3500.0) AS INT)
+                WHEN n <= 65000 THEN 1 + CAST((((n - 35001) / 25) * 4800.0 / 1200.0) AS INT)
+                WHEN n <= 77700 THEN 1 + CAST((((n - 65001) / (@bs_cnt - 35)) * 4800.0 / 747.0) AS INT)
+                WHEN n <= 88200 THEN ((n * 3) % 4500) + 1                      -- Overlapping active slot for Rejected
+                ELSE ((n * 7) % 4500) + 1                                      -- Inactive slot
             END AS target_slot_seq,
 
             ((n * 11) % @au_cnt) + 1 AS requester_rn,
@@ -628,7 +633,7 @@ BEGIN TRY
     INTO #AdvMaint
     FROM dbo.MAINTENANCERECORD
     WHERE impact_level = 'advisory'
-      AND maintenance_status IN ('Reported', 'In Progress', 'Resolved');
+      AND maintenance_status IN ('Reported', 'In Progress');
 
     CREATE CLUSTERED INDEX IX_Temp_AdvMaint ON #AdvMaint(space_code, start_time);
 
@@ -779,6 +784,8 @@ BEGIN TRY
 
     PRINT 'All triggers re-enabled.';
 
+    COMMIT TRANSACTION;
+
     PRINT '============================================================';
     PRINT 'Step 14: Data Generation Complete';
     PRINT '============================================================';
@@ -800,6 +807,9 @@ BEGIN TRY
 
 END TRY
 BEGIN CATCH
+    IF @@TRANCOUNT > 0
+        ROLLBACK TRANSACTION;
+
     PRINT 'Error encountered during generation. Restoring triggers...';
     IF OBJECT_ID('dbo.TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE', 'TR') IS NOT NULL
         ENABLE TRIGGER TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE ON dbo.BOOKING;
