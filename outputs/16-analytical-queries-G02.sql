@@ -1,38 +1,10 @@
-/* ============================================================
-   QUERY 4: APPROVED BOOKINGS AFFECTED BY MAINTENANCE ESCALATION
-   ============================================================
-
-   Business Question:
-   Which approved bookings overlap the period of a selected maintenance
-   record that has been escalated from advisory to out-of-service?
-
-   Target User(s): Facility Staff; Facility Manager.
-
-   Business Value:
-   Identifies requesters for staff follow-up after an escalation. The result
-   supports contact, relocation, cancellation, or other follow-up; it does
-   not perform any of those actions.
-
-   Related Requirement(s):
-   Phase 2 maintenance-impact rule requiring already-approved, overlapping
-   bookings to be identifiable when advisory maintenance is escalated to
-   out-of-service.
-
-   Parameters:
-   @maintenance_id INT: selected dbo.MAINTENANCERECORD.maintenance_id.
-
-   Schema Assumptions and Limitations:
-   - dbo.MAINTENANCE_IMPACT_HISTORY records escalation events. This query
-     requires at least one advisory-to-out-of-service history row and returns
-     the latest such event for the selected maintenance record.
-   - The selected record must currently have impact_level = 'out-of-service'.
-     A maintenance record that was later downgraded is deliberately excluded.
-   - NULL completion_time means open-ended maintenance and is treated as
-     ending at 9999-12-31, consistent with Step 12.
-   - The schema does not persist an affected-booking snapshot at escalation.
-     Therefore, the result identifies rows whose current booking_status is
-     'Approved'; it cannot prove a booking was approved at changed_at.
-*/
+-- ============================================================
+-- Database: Campus Space Management System
+-- Platform: Microsoft SQL Server
+-- Group: G02
+-- Step 16: Analytical Queries
+-- File: 16-analytical-queries-G02.sql
+-- ============================================================
 
 USE University;
 GO
@@ -40,9 +12,125 @@ GO
 SET NOCOUNT ON;
 GO
 
--- SQL Statement
--- Replace 18 with the selected maintenance record ID. The deterministic
--- Step 14 generator creates an escalation-history candidate with this ID.
+PRINT '============================================================';
+PRINT 'Step 16: Executing Analytical Queries (Group G02)';
+PRINT '============================================================';
+PRINT '';
+GO
+
+-- ============================================================
+-- Query 1: Total Approved Booking Hours of Each Space for a Given Semester
+-- ============================================================
+/*
+1. Business Question:
+   What is the total accumulated duration (in hours) of approved bookings for each space on campus during a specified academic semester?
+
+2. Target User:
+   Facility Manager, Department Administrators, and Academic Space Planners.
+
+3. Business Value:
+   Provides essential space utilization metrics across campus buildings and room types.
+   Enables administrators to identify heavily congested rooms vs underutilized spaces,
+   informing future space allocation, energy management, maintenance scheduling, and capital planning.
+
+4. Parameters:
+   @SemesterName NVARCHAR(50) — Human-readable semester label (e.g., 'Fall 2024')
+   @SemesterStart DATETIME    — Inclusive start timestamp of the semester (e.g., '2024-09-01 00:00:00')
+   @SemesterEnd DATETIME      — Inclusive end timestamp of the semester (e.g., '2024-12-31 23:59:59')
+
+5. SQL Statement:
+   Provided below.
+
+6. Correctness Notes:
+   - Active Booking Filter: Considers only bookings in active approved states ('Approved', 'Checked In', 'Completed'). Excludes 'Pending', 'Rejected', 'Cancelled', and 'No-Show'.
+   - Space Coverage: Performs a LEFT JOIN from dbo.SPACE to dbo.BOOKING so that every space in the system is reported, including spaces with zero bookings during the target semester.
+   - Duration Calculation: Calculates total minutes using DATEDIFF(MINUTE, requested_start, requested_end), sums them per space, handles NULLs using ISNULL(..., 0), and divides by 60.0 to return an accurate decimal hour value without integer truncation.
+   - Semester Boundary Filter: Filters bookings whose requested_start falls within [@SemesterStart, @SemesterEnd].
+
+7. Expected Output Meaning:
+   - space_code, space_name, space_type, building, capacity: Descriptive space attributes.
+   - total_approved_bookings: Total count of active approved reservations during the semester.
+   - total_approved_hours: Accumulated reservation hours. A value of 0.00 indicates no approved bookings occurred in that space during the semester.
+*/
+
+PRINT '--- Query 1: Total Approved Booking Hours per Space for a Given Semester ---';
+
+-- Declare Semester Parameters (Default: Fall 2024)
+DECLARE @SemesterName NVARCHAR(50) = 'Fall 2024';
+DECLARE @SemesterStart DATETIME   = '2024-09-01 00:00:00';
+DECLARE @SemesterEnd DATETIME     = '2024-12-31 23:59:59';
+
+SELECT
+    s.space_code,
+    s.space_name,
+    s.space_type,
+    s.building,
+    s.floor,
+    s.room_number,
+    s.capacity,
+    s.current_status,
+    @SemesterName AS semester,
+    COUNT(b.booking_id) AS total_approved_bookings,
+    CAST(ISNULL(SUM(DATEDIFF(MINUTE, b.requested_start, b.requested_end)), 0) / 60.0 AS DECIMAL(10, 2)) AS total_approved_hours
+FROM dbo.SPACE s
+LEFT JOIN dbo.BOOKING b
+    ON s.space_code = b.space_code
+   AND b.booking_status IN ('Approved', 'Checked In', 'Completed')
+   AND b.requested_start >= @SemesterStart
+   AND b.requested_start <= @SemesterEnd
+GROUP BY
+    s.space_code,
+    s.space_name,
+    s.space_type,
+    s.building,
+    s.floor,
+    s.room_number,
+    s.capacity,
+    s.current_status
+ORDER BY
+    total_approved_hours DESC,
+    s.space_code ASC;
+GO
+
+PRINT '============================================================';
+PRINT 'Query 1 Execution Complete';
+PRINT '============================================================';
+PRINT '';
+GO
+
+-- ============================================================
+-- QUERY 4: APPROVED BOOKINGS AFFECTED BY MAINTENANCE ESCALATION
+-- ============================================================
+/*
+1. Business Question:
+   Which approved bookings overlap the period of a selected maintenance
+   record that has been escalated from advisory to out-of-service?
+
+2. Target User(s): Facility Staff; Facility Manager.
+
+3. Business Value:
+   Identifies requesters for staff follow-up after an escalation. The result
+   supports contact, relocation, cancellation, or other follow-up; it does
+   not perform any of those actions.
+
+4. Parameters:
+   @maintenance_id INT: selected dbo.MAINTENANCERECORD.maintenance_id.
+
+5. Correctness Notes:
+   - dbo.MAINTENANCE_IMPACT_HISTORY records escalation events. Requires at least
+     one advisory-to-out-of-service history row and returns the latest such event.
+   - The selected record must currently have impact_level = 'out-of-service'.
+   - NULL completion_time means open-ended maintenance and is treated as ending at 9999-12-31.
+   - Half-open interval: b.requested_start < ISNULL(tm.completion_time, '9999-12-31')
+     AND b.requested_end > tm.start_time.
+
+6. Expected Output Meaning:
+   Returns one row per currently approved booking on the escalated maintenance record's space
+   whose requested period overlaps maintenance.
+*/
+
+PRINT '--- Query 4: Approved Bookings Affected by Maintenance Escalation ---';
+
 DECLARE @maintenance_id INT = 18;
 
 IF NOT EXISTS
@@ -120,7 +208,6 @@ JOIN dbo.SPACE AS s
 JOIN dbo.BOOKING AS b
     ON b.space_code = tm.space_code
    AND b.booking_status = 'Approved'
-   -- Half-open interval: adjacency is not an overlap.
    AND b.requested_start < ISNULL(tm.completion_time, CONVERT(DATETIME, '9999-12-31', 120))
    AND b.requested_end > tm.start_time
 JOIN dbo.[USER] AS u
@@ -128,37 +215,7 @@ JOIN dbo.[USER] AS u
 ORDER BY b.requested_start, b.booking_id;
 GO
 
-/*
-   Expected Behavior:
-   - Returns one row per currently approved booking on the selected
-     maintenance record's space whose requested period overlaps maintenance.
-   - Returns zero rows when the selected, qualifying escalation has no such
-     approved booking.
-   - Raises error 51030 when the maintenance ID is missing, advisory-only,
-     currently downgraded, or has no recorded advisory-to-out-of-service event.
-
-   Functional Test Cases (prepared; not executed here):
-   1. Multiple affected bookings: create two approved overlapping bookings for
-      one escalated maintenance record; expect two distinct booking_id values.
-   2. No affected bookings: use a qualifying escalation with no approved
-      overlap; expect zero rows.
-   3. Advisory-only maintenance: use an advisory record without escalation;
-      expect error 51030.
-   4. Another space: add an approved overlapping-time booking on another
-      space; expect it to be excluded.
-   5. Booking ends at maintenance start: expect exclusion.
-   6. Booking starts at maintenance completion: expect exclusion.
-   7. Booking fully inside maintenance: expect inclusion.
-   8. Maintenance fully inside booking: expect inclusion.
-   9. Open-ended maintenance: set completion_time to NULL on a qualifying
-      open record; expect any later approved booking on the same space to be
-      included.
-   10. Duplicate prevention: add advisory acknowledgements or multiple history
-       rows; expect each affected booking_id once. The query joins neither
-       acknowledgement rows nor raw history rows, and CROSS APPLY selects one
-       latest escalation event.
-
-   Step 13 M2 can provide an isolated runtime follow-up case: after
-   12-maintenance-affected-booking.sql runs, set @maintenance_id to the
-   T13-SPACE-A escalation record and expect its approved booking to appear.
-*/
+PRINT '============================================================';
+PRINT 'Query 4 Execution Complete';
+PRINT '============================================================';
+GO
