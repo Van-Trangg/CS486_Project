@@ -151,22 +151,52 @@ JOIN dbo.MAINTENANCERECORD m
 GO
 
 -- ============================================================
--- Check 5: Advisory Disclosure Temporal Validity (R14-2, R14-3)
+-- Check 5: Advisory Acknowledgement Comprehensive Audit (R14-2 fix)
 -- ============================================================
 PRINT '';
-PRINT '--- Check 5: Advisory Disclosure Temporal Audit ---';
+PRINT '--- Check 5: Advisory Acknowledgement Comprehensive Audit ---';
 
+-- 5a: Verify all acknowledged maintenance records have advisory impact level
 SELECT
-    'ADVISORY ACK TEMPORAL AUDIT' AS check_type,
+    'ACK IMPACT LEVEL AUDIT' AS check_type,
     COUNT(*) AS total_acks,
-    SUM(CASE WHEN m.start_time <= ack.acknowledged_at THEN 1 ELSE 0 END) AS valid_past_or_current_advisories,
-    SUM(CASE WHEN m.start_time > ack.acknowledged_at THEN 1 ELSE 0 END) AS invalid_future_advisories,
+    SUM(CASE WHEN m.impact_level = 'advisory' THEN 1 ELSE 0 END) AS advisory_acks,
+    SUM(CASE WHEN m.impact_level <> 'advisory' THEN 1 ELSE 0 END) AS non_advisory_acks,
+    CASE WHEN SUM(CASE WHEN m.impact_level <> 'advisory' THEN 1 ELSE 0 END) = 0
+        THEN 'PASS' ELSE 'FAIL' END AS result
+FROM dbo.BOOKING_ADVISORY_ACK ack
+JOIN dbo.MAINTENANCERECORD m ON ack.maintenance_id = m.maintenance_id;
+
+-- 5b: Verify advisory was temporally active at acknowledgement time
+SELECT
+    'ACK TEMPORAL WINDOW AUDIT' AS check_type,
+    COUNT(*) AS total_acks,
+    SUM(CASE WHEN m.start_time <= ack.acknowledged_at
+              AND ISNULL(m.completion_time, '9999-12-31') > ack.acknowledged_at THEN 1 ELSE 0 END) AS valid_within_period,
+    SUM(CASE WHEN m.start_time > ack.acknowledged_at THEN 1 ELSE 0 END) AS invalid_future,
+    SUM(CASE WHEN ISNULL(m.completion_time, '9999-12-31') <= ack.acknowledged_at THEN 1 ELSE 0 END) AS invalid_expired,
     CASE
-        WHEN COUNT(*) > 0 AND SUM(CASE WHEN m.start_time > ack.acknowledged_at THEN 1 ELSE 0 END) = 0
-        THEN 'PASS'
-        ELSE 'FAIL'
+        WHEN SUM(CASE WHEN m.start_time > ack.acknowledged_at THEN 1 ELSE 0 END) = 0
+         AND SUM(CASE WHEN ISNULL(m.completion_time, '9999-12-31') <= ack.acknowledged_at THEN 1 ELSE 0 END) = 0
+        THEN 'PASS' ELSE 'FAIL'
     END AS result
 FROM dbo.BOOKING_ADVISORY_ACK ack
+JOIN dbo.MAINTENANCERECORD m ON ack.maintenance_id = m.maintenance_id;
+
+-- 5c: Verify booking period overlaps advisory maintenance period
+SELECT
+    'ACK PERIOD OVERLAP AUDIT' AS check_type,
+    COUNT(*) AS total_acks,
+    SUM(CASE WHEN b.requested_start < ISNULL(m.completion_time, '9999-12-31')
+              AND b.requested_end > m.start_time THEN 1 ELSE 0 END) AS valid_overlapping,
+    SUM(CASE WHEN NOT (b.requested_start < ISNULL(m.completion_time, '9999-12-31')
+              AND b.requested_end > m.start_time) THEN 1 ELSE 0 END) AS non_overlapping,
+    CASE WHEN SUM(CASE WHEN NOT (b.requested_start < ISNULL(m.completion_time, '9999-12-31')
+              AND b.requested_end > m.start_time) THEN 1 ELSE 0 END) = 0
+        THEN 'PASS' ELSE 'FAIL'
+    END AS result
+FROM dbo.BOOKING_ADVISORY_ACK ack
+JOIN dbo.BOOKING b ON ack.booking_id = b.booking_id
 JOIN dbo.MAINTENANCERECORD m ON ack.maintenance_id = m.maintenance_id;
 GO
 
@@ -284,6 +314,42 @@ WHERE t.parent_id IN (
     OBJECT_ID('dbo.USAGESESSION')
 )
 ORDER BY OBJECT_NAME(t.parent_id), t.name;
+GO
+
+-- ============================================================
+-- Check 12: Escalation-Affected Booking & Approved Date Span Audit
+-- ============================================================
+PRINT '';
+PRINT '--- Check 12: Escalation-Affected Booking & Approved Date Span ---';
+
+-- 12a: Verify escalation-affected approved bookings exist
+SELECT
+    'ESCALATION-AFFECTED BOOKINGS' AS check_type,
+    COUNT(DISTINCT b.booking_id) AS affected_approved_bookings,
+    COUNT(DISTINCT m.maintenance_id) AS escalated_maintenance_records,
+    CASE WHEN COUNT(DISTINCT b.booking_id) > 0 THEN 'PASS'
+         ELSE 'FAIL (No escalation-affected bookings found)' END AS result
+FROM dbo.BOOKING b
+JOIN dbo.MAINTENANCERECORD m
+    ON b.space_code = m.space_code
+    AND m.impact_level = 'out-of-service'
+    AND b.booking_status = 'Approved'
+    AND b.requested_start < ISNULL(m.completion_time, '9999-12-31')
+    AND b.requested_end > m.start_time
+JOIN dbo.MAINTENANCE_IMPACT_HISTORY h
+    ON h.maintenance_id = m.maintenance_id
+    AND h.old_impact_level = 'advisory'
+    AND h.new_impact_level = 'out-of-service';
+
+-- 12b: Verify Approved bookings span at least 3 calendar years
+SELECT
+    'APPROVED BOOKING DATE SPAN' AS check_type,
+    MIN(requested_start) AS earliest_approved,
+    MAX(requested_start) AS latest_approved,
+    COUNT(DISTINCT YEAR(requested_start)) AS calendar_years_with_approved,
+    CASE WHEN COUNT(DISTINCT YEAR(requested_start)) >= 3 THEN 'PASS' ELSE 'FAIL' END AS result
+FROM dbo.BOOKING
+WHERE booking_status = 'Approved';
 GO
 
 PRINT '============================================================';

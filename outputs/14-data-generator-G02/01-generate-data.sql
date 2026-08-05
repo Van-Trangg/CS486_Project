@@ -475,11 +475,16 @@ BEGIN TRY
     BookingPlan AS (
         SELECT
             n,
-            -- Status distribution: 55% Completed, 15% Approved, 4% Checked In (Active = 74%), 10% Rejected, 8% Cancelled, 5% No-Show, 3% Pending
+            -- Status distribution (R14-4 fix): Active statuses use modular hash
+            -- to distribute Approved/Completed/Checked In across ALL dates and semesters.
+            -- 77700 active / 74 = 1050 exact cycles: 55 Completed + 15 Approved + 4 Checked In
             CASE
-                WHEN n <= 57750 THEN 'Completed'   -- 55.0% (Active)
-                WHEN n <= 73500 THEN 'Approved'    -- 15.0% (Active)
-                WHEN n <= 77700 THEN 'Checked In'  --  4.0% (Active)
+                WHEN n <= 77700 THEN  -- Active bookings: modular distribution across all dates
+                    CASE
+                        WHEN n % 74 < 55 THEN 'Completed'    -- 57,750 rows (55%)
+                        WHEN n % 74 < 70 THEN 'Approved'     -- 15,750 rows (15%)
+                        ELSE 'Checked In'                     --  4,200 rows (4%)
+                    END
                 WHEN n <= 88200 THEN 'Rejected'    -- 10.0% (Inactive)
                 WHEN n <= 96600 THEN 'Cancelled'   --  8.0% (Inactive)
                 WHEN n <= 101850 THEN 'No-Show'    --  5.0% (Inactive)
@@ -638,8 +643,8 @@ BEGIN TRY
         AND m.start_time <= b.created_at
         AND m.comp_time > b.created_at
         AND b.requested_start < m.comp_time
-        AND b.requested_end > m.start_time
-    WHERE b.booking_status NOT IN ('Rejected', 'Cancelled');
+        AND b.requested_end > m.start_time;
+    -- R14-1 fix: All submitted bookings receive acks regardless of eventual status
 
     DROP TABLE IF EXISTS #AdvMaint;
 
@@ -688,6 +693,56 @@ BEGIN TRY
 
     DECLARE @hist_count INT = (SELECT COUNT(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY);
     PRINT 'Generated ' + CAST(@hist_count AS VARCHAR) + ' MAINTENANCE_IMPACT_HISTORY rows.';
+
+    -- ============================================================
+    -- Section 11.5: Generate Escalation-Affected Approved Bookings
+    -- R14-3 fix: Bookings approved while maintenance was advisory,
+    -- now overlapping maintenance escalated to out-of-service.
+    -- Enables nontrivial results for Query 4 (Report 4).
+    -- ============================================================
+    PRINT 'Generating escalation-affected approved bookings...';
+
+    INSERT INTO dbo.BOOKING (space_code, requester_id, requested_start, requested_end,
+        purpose, expected_participants, booking_status, created_at,
+        approver_id, decision_time, decision_note, rejection_reason, approval_path)
+    SELECT
+        em.space_code,
+        au.user_id AS requester_id,
+        em.booking_start AS requested_start,
+        em.booking_end AS requested_end,
+        'Meeting' AS purpose,
+        CASE WHEN em.capacity >= 10 THEN 10 ELSE em.capacity END AS expected_participants,
+        'Approved' AS booking_status,
+        DATEADD(DAY, -7, em.booking_start) AS created_at,
+        su.user_id AS approver_id,
+        DATEADD(DAY, -5, em.booking_start) AS decision_time,
+        'Approved while space had advisory-level maintenance. Affected by subsequent escalation.' AS decision_note,
+        NULL AS rejection_reason,
+        'Staff' AS approval_path
+    FROM (
+        SELECT
+            m.maintenance_id,
+            m.space_code,
+            s.capacity,
+            DATEADD(HOUR, 2, m.start_time) AS booking_start,
+            DATEADD(HOUR, 4, m.start_time) AS booking_end,
+            ROW_NUMBER() OVER (PARTITION BY m.space_code ORDER BY m.maintenance_id) AS space_rn
+        FROM dbo.MAINTENANCERECORD m
+        JOIN dbo.SPACE s ON s.space_code = m.space_code
+        JOIN dbo.MAINTENANCE_IMPACT_HISTORY h
+            ON h.maintenance_id = m.maintenance_id
+            AND h.old_impact_level = 'advisory'
+            AND h.new_impact_level = 'out-of-service'
+        WHERE m.impact_level = 'out-of-service'
+          AND m.maintenance_status IN ('In Progress', 'Resolved')
+          AND ISNULL(m.completion_time, DATEADD(HOUR, 24, m.start_time)) > DATEADD(HOUR, 4, m.start_time)
+    ) em
+    JOIN #ActiveUsers au ON au.rn = ((em.maintenance_id * 3) % @au_cnt) + 1
+    JOIN #StaffUsers su ON su.rn = ((em.maintenance_id * 7) % @su_cnt) + 1
+    WHERE em.space_rn = 1;  -- One per space to guarantee no self-overlaps
+
+    DECLARE @esc_count INT = @@ROWCOUNT;
+    PRINT 'Generated ' + CAST(@esc_count AS VARCHAR) + ' escalation-affected approved bookings.';
 
     -- ============================================================
     -- Section 12: Cleanup temp tables
