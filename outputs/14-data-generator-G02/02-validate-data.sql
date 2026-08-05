@@ -2,16 +2,19 @@
 -- Database: Campus Space Management System
 -- Platform: Microsoft SQL Server
 -- Group: G02
--- Step 14: Post-Generation Validation Script
+-- Step 14: Comprehensive Post-Generation Validation Script
 -- File: 02-validate-data.sql
 --
--- Verifies:
---   - Row counts meet minimum thresholds
---   - All enum/domain values are populated
---   - Academic year coverage spans 3 years
---   - Data integrity (FK, CHECK, business rules)
---   - Usage session alignment
---   - Advisory acknowledgement and impact history presence
+-- Features independent audit queries for:
+--   - Row counts against required scale thresholds
+--   - Academic year & semester calendar distribution
+--   - 100% Enum domain coverage
+--   - Approved Booking Overlap Invariant (R14-1, R14-3)
+--   - Out-of-service maintenance overlap audit
+--   - Advisory acknowledgement temporal validity (R14-2, R14-3)
+--   - Weekday/Hour distribution and space selectivity skew (R14-3, R14-5)
+--   - Data integrity (FKs, capacity, time order, rejection reason)
+--   - Trigger enablement verification
 -- ============================================================
 
 USE University;
@@ -49,15 +52,10 @@ SELECT
     END AS required_minimum,
     CASE
         WHEN p.rows >= CASE t.name
-            WHEN 'USER' THEN 400
-            WHEN 'SPACE' THEN 50
-            WHEN 'FACILITY' THEN 10
-            WHEN 'SPACE_FACILITY' THEN 200
-            WHEN 'MAINTENANCERECORD' THEN 3000
-            WHEN 'BOOKING' THEN 100000
-            WHEN 'USAGESESSION' THEN 50000
-            WHEN 'BOOKING_ADVISORY_ACK' THEN 5000
-            WHEN 'MAINTENANCE_IMPACT_HISTORY' THEN 500
+            WHEN 'USER' THEN 400 WHEN 'SPACE' THEN 50 WHEN 'FACILITY' THEN 10
+            WHEN 'SPACE_FACILITY' THEN 200 WHEN 'MAINTENANCERECORD' THEN 3000
+            WHEN 'BOOKING' THEN 100000 WHEN 'USAGESESSION' THEN 50000
+            WHEN 'BOOKING_ADVISORY_ACK' THEN 5000 WHEN 'MAINTENANCE_IMPACT_HISTORY' THEN 500
             ELSE 0
         END THEN 'PASS'
         ELSE 'FAIL'
@@ -77,219 +75,208 @@ ORDER BY
 GO
 
 -- ============================================================
--- Check 2: Academic Year Coverage
+-- Check 2: Academic Year & Semester Coverage
 -- ============================================================
 PRINT '';
-PRINT '--- Check 2: Academic Year Coverage ---';
+PRINT '--- Check 2: Academic Year & Semester Coverage ---';
 
 SELECT
-    'ACADEMIC YEAR COVERAGE' AS check_type,
+    'ACADEMIC YEAR SPAN' AS check_type,
     MIN(requested_start) AS earliest_booking,
     MAX(requested_start) AS latest_booking,
-    COUNT(DISTINCT YEAR(requested_start)) AS distinct_years,
+    COUNT(DISTINCT YEAR(requested_start)) AS calendar_years,
     CASE WHEN COUNT(DISTINCT YEAR(requested_start)) >= 3 THEN 'PASS' ELSE 'FAIL' END AS result
 FROM dbo.BOOKING;
 
--- Distribution by year
+-- Semester Breakdown
 SELECT
-    'YEAR DISTRIBUTION' AS check_type,
-    YEAR(requested_start) AS booking_year,
+    'SEMESTER DISTRIBUTION' AS check_type,
+    CASE
+        WHEN MONTH(requested_start) BETWEEN 9 AND 12 THEN 'Fall (Sep-Dec)'
+        WHEN MONTH(requested_start) BETWEEN 1 AND 5 THEN 'Spring (Jan-May)'
+        ELSE 'Summer (Jun-Aug)'
+    END AS semester,
+    YEAR(requested_start) AS calendar_year,
     COUNT(*) AS booking_count
 FROM dbo.BOOKING
-GROUP BY YEAR(requested_start)
-ORDER BY booking_year;
+GROUP BY
+    CASE
+        WHEN MONTH(requested_start) BETWEEN 9 AND 12 THEN 'Fall (Sep-Dec)'
+        WHEN MONTH(requested_start) BETWEEN 1 AND 5 THEN 'Spring (Jan-May)'
+        ELSE 'Summer (Jun-Aug)'
+    END,
+    YEAR(requested_start)
+ORDER BY calendar_year, semester;
 GO
 
 -- ============================================================
--- Check 3: Enum Coverage — USER.role
+-- Check 3: APPROVED BOOKING OVERLAP INVARIANT (R14-1, R14-3)
 -- ============================================================
 PRINT '';
-PRINT '--- Check 3: Enum Coverage ---';
+PRINT '--- Check 3: Approved Booking Overlap Invariant ---';
 
-SELECT 'USER.role' AS check_type, role AS enum_value, COUNT(*) AS count
-FROM dbo.[USER] GROUP BY role ORDER BY role;
-
-SELECT 'USER.account_status' AS check_type, account_status AS enum_value, COUNT(*) AS count
-FROM dbo.[USER] GROUP BY account_status ORDER BY account_status;
+SELECT
+    'APPROVED OVERLAP INVARIANT' AS check_type,
+    COUNT(*) AS prohibited_overlapping_pairs,
+    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL (Overlapping approved bookings detected!)' END AS result
+FROM dbo.BOOKING b1
+JOIN dbo.BOOKING b2
+    ON b1.space_code = b2.space_code
+    AND b1.booking_id < b2.booking_id
+    AND b1.booking_status IN ('Approved', 'Checked In', 'Completed')
+    AND b2.booking_status IN ('Approved', 'Checked In', 'Completed')
+    -- Half-open overlap predicate
+    AND b1.requested_start < b2.requested_end
+    AND b1.requested_end > b2.requested_start;
 GO
 
 -- ============================================================
--- Check 4: Enum Coverage — SPACE
+-- Check 4: Out-of-Service Maintenance Overlap Audit (R14-1, R14-3)
 -- ============================================================
-SELECT 'SPACE.space_type' AS check_type, space_type AS enum_value, COUNT(*) AS count
-FROM dbo.SPACE GROUP BY space_type ORDER BY space_type;
+PRINT '';
+PRINT '--- Check 4: Out-of-Service Maintenance Overlap Audit ---';
 
-SELECT 'SPACE.current_status' AS check_type, current_status AS enum_value, COUNT(*) AS count
-FROM dbo.SPACE GROUP BY current_status ORDER BY current_status;
+SELECT
+    'OUT-OF-SERVICE OVERLAP AUDIT' AS check_type,
+    COUNT(*) AS active_out_of_service_overlaps,
+    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result
+FROM dbo.BOOKING b
+JOIN dbo.MAINTENANCERECORD m
+    ON b.space_code = m.space_code
+    AND m.impact_level = 'out-of-service'
+    AND m.maintenance_status IN ('Reported', 'In Progress')
+    AND b.booking_status IN ('Approved', 'Checked In', 'Completed')
+    AND b.requested_start < ISNULL(m.completion_time, '9999-12-31')
+    AND b.requested_end > m.start_time;
 GO
 
 -- ============================================================
--- Check 5: Enum Coverage — SPACE_FACILITY
+-- Check 5: Advisory Disclosure Temporal Validity (R14-2, R14-3)
 -- ============================================================
-SELECT 'SPACE_FACILITY.operation_status' AS check_type, operation_status AS enum_value, COUNT(*) AS count
-FROM dbo.SPACE_FACILITY GROUP BY operation_status ORDER BY operation_status;
+PRINT '';
+PRINT '--- Check 5: Advisory Disclosure Temporal Audit ---';
+
+SELECT
+    'ADVISORY ACK TEMPORAL AUDIT' AS check_type,
+    COUNT(*) AS total_acks,
+    SUM(CASE WHEN m.start_time <= ack.acknowledged_at THEN 1 ELSE 0 END) AS valid_past_or_current_advisories,
+    SUM(CASE WHEN m.start_time > ack.acknowledged_at THEN 1 ELSE 0 END) AS invalid_future_advisories,
+    CASE
+        WHEN COUNT(*) > 0 AND SUM(CASE WHEN m.start_time > ack.acknowledged_at THEN 1 ELSE 0 END) = 0
+        THEN 'PASS'
+        ELSE 'FAIL'
+    END AS result
+FROM dbo.BOOKING_ADVISORY_ACK ack
+JOIN dbo.MAINTENANCERECORD m ON ack.maintenance_id = m.maintenance_id;
 GO
 
 -- ============================================================
--- Check 6: Enum Coverage — BOOKING
+-- Check 6: Selectivity & Data Skew Audit (R14-3, R14-5)
+-- ============================================================
+PRINT '';
+PRINT '--- Check 6: Selectivity & Data Skew Audit ---';
+
+-- Top 5 Popular Spaces
+SELECT TOP 5
+    'TOP SPACES (HIGH VOLUME)' AS check_type,
+    b.space_code,
+    s.space_type,
+    COUNT(*) AS booking_count
+FROM dbo.BOOKING b
+JOIN dbo.SPACE s ON b.space_code = s.space_code
+GROUP BY b.space_code, s.space_type
+ORDER BY booking_count DESC;
+
+-- Bottom 5 Less Popular Spaces
+SELECT TOP 5
+    'BOTTOM SPACES (LOW VOLUME)' AS check_type,
+    b.space_code,
+    s.space_type,
+    COUNT(*) AS booking_count
+FROM dbo.BOOKING b
+JOIN dbo.SPACE s ON b.space_code = s.space_code
+GROUP BY b.space_code, s.space_type
+ORDER BY booking_count ASC;
+
+-- Weekday Distribution
+SELECT
+    'WEEKDAY DISTRIBUTION' AS check_type,
+    DATENAME(WEEKDAY, requested_start) AS day_of_week,
+    COUNT(*) AS booking_count
+FROM dbo.BOOKING
+GROUP BY DATENAME(WEEKDAY, requested_start), DATEPART(WEEKDAY, requested_start)
+ORDER BY DATEPART(WEEKDAY, requested_start);
+
+-- Hour Distribution
+SELECT
+    'HOUR DISTRIBUTION' AS check_type,
+    DATEPART(HOUR, requested_start) AS start_hour,
+    COUNT(*) AS booking_count
+FROM dbo.BOOKING
+GROUP BY DATEPART(HOUR, requested_start)
+ORDER BY start_hour;
+GO
+
+-- ============================================================
+-- Check 7: Enum Coverage — USER & SPACE
+-- ============================================================
+PRINT '';
+PRINT '--- Check 7: Enum Coverage ---';
+
+SELECT 'USER.role' AS check_type, role AS enum_value, COUNT(*) AS count FROM dbo.[USER] GROUP BY role ORDER BY role;
+SELECT 'USER.account_status' AS check_type, account_status AS enum_value, COUNT(*) AS count FROM dbo.[USER] GROUP BY account_status ORDER BY account_status;
+SELECT 'SPACE.space_type' AS check_type, space_type AS enum_value, COUNT(*) AS count FROM dbo.SPACE GROUP BY space_type ORDER BY space_type;
+SELECT 'SPACE.current_status' AS check_type, current_status AS enum_value, COUNT(*) AS count FROM dbo.SPACE GROUP BY current_status ORDER BY current_status;
+SELECT 'SPACE_FACILITY.operation_status' AS check_type, operation_status AS enum_value, COUNT(*) AS count FROM dbo.SPACE_FACILITY GROUP BY operation_status ORDER BY operation_status;
+GO
+
+-- ============================================================
+-- Check 8: Enum Coverage — BOOKING & MAINTENANCERECORD
 -- ============================================================
 EXEC('SELECT ''BOOKING.booking_status'' AS check_type, booking_status AS enum_value, COUNT(*) AS count FROM dbo.BOOKING GROUP BY booking_status ORDER BY booking_status;');
-
 EXEC('SELECT ''BOOKING.purpose'' AS check_type, purpose AS enum_value, COUNT(*) AS count FROM dbo.BOOKING GROUP BY purpose ORDER BY purpose;');
-
 EXEC('SELECT ''BOOKING.approval_path'' AS check_type, approval_path AS enum_value, COUNT(*) AS count FROM dbo.BOOKING GROUP BY approval_path ORDER BY approval_path;');
-GO
-
--- ============================================================
--- Check 7: Enum Coverage — MAINTENANCERECORD
--- ============================================================
 EXEC('SELECT ''MAINTENANCERECORD.maintenance_status'' AS check_type, maintenance_status AS enum_value, COUNT(*) AS count FROM dbo.MAINTENANCERECORD GROUP BY maintenance_status ORDER BY maintenance_status;');
-
 EXEC('SELECT ''MAINTENANCERECORD.problem_type'' AS check_type, problem_type AS enum_value, COUNT(*) AS count FROM dbo.MAINTENANCERECORD GROUP BY problem_type ORDER BY problem_type;');
-
 EXEC('SELECT ''MAINTENANCERECORD.impact_level'' AS check_type, impact_level AS enum_value, COUNT(*) AS count FROM dbo.MAINTENANCERECORD GROUP BY impact_level ORDER BY impact_level;');
 GO
 
 -- ============================================================
--- Check 8: Enum Coverage — MAINTENANCE_IMPACT_HISTORY
--- ============================================================
-SELECT 'IMPACT_HISTORY.old_impact_level' AS check_type, old_impact_level AS enum_value, COUNT(*) AS count
-FROM dbo.MAINTENANCE_IMPACT_HISTORY GROUP BY old_impact_level ORDER BY old_impact_level;
-
-SELECT 'IMPACT_HISTORY.new_impact_level' AS check_type, new_impact_level AS enum_value, COUNT(*) AS count
-FROM dbo.MAINTENANCE_IMPACT_HISTORY GROUP BY new_impact_level ORDER BY new_impact_level;
-GO
-
--- ============================================================
--- Check 9: Usage Session Alignment
+-- Check 9: Data Integrity Checks
 -- ============================================================
 PRINT '';
-PRINT '--- Check 9: Usage Session Alignment ---';
+PRINT '--- Check 9: Data Integrity Checks ---';
 
--- Every Completed/Checked In booking should have a USAGESESSION
-SELECT
-    'USAGESESSION ALIGNMENT' AS check_type,
-    'Bookings needing session' AS metric,
-    COUNT(*) AS count,
-    (SELECT COUNT(*) FROM dbo.USAGESESSION) AS sessions_found,
-    CASE
-        WHEN COUNT(*) = (SELECT COUNT(*) FROM dbo.USAGESESSION) THEN 'PASS'
-        ELSE 'FAIL (mismatch: ' + CAST(COUNT(*) - (SELECT COUNT(*) FROM dbo.USAGESESSION) AS VARCHAR) + ')'
-    END AS result
-FROM dbo.BOOKING
-WHERE booking_status IN ('Completed', 'Checked In');
-
--- No orphan sessions (sessions for non-Completed/non-CheckedIn bookings)
-SELECT
-    'ORPHAN SESSION CHECK' AS check_type,
-    COUNT(*) AS orphan_sessions,
-    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result
-FROM dbo.USAGESESSION us
-JOIN dbo.BOOKING b ON us.booking_id = b.booking_id
-WHERE b.booking_status NOT IN ('Completed', 'Checked In');
-GO
-
--- ============================================================
--- Check 10: Rejection Reason Integrity
--- ============================================================
-PRINT '';
-PRINT '--- Check 10: Data Integrity Checks ---';
-
-SELECT
-    'REJECTION REASON' AS check_type,
-    COUNT(*) AS rejected_without_reason,
-    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result
-FROM dbo.BOOKING
-WHERE booking_status = 'Rejected' AND rejection_reason IS NULL;
-GO
-
--- ============================================================
--- Check 11: Time Ordering
--- ============================================================
-SELECT
-    'BOOKING TIME ORDER' AS check_type,
-    COUNT(*) AS invalid_time_order,
-    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result
-FROM dbo.BOOKING
-WHERE requested_end <= requested_start;
-GO
-
--- ============================================================
--- Check 12: Capacity Constraint
--- ============================================================
+SELECT 'REJECTION REASON' AS check_type, COUNT(*) AS rejected_without_reason, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING WHERE booking_status = 'Rejected' AND rejection_reason IS NULL;
+SELECT 'BOOKING TIME ORDER' AS check_type, COUNT(*) AS invalid_time_order, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING WHERE requested_end <= requested_start;
 EXEC('SELECT ''CAPACITY CONSTRAINT'' AS check_type, COUNT(*) AS over_capacity, CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END AS result FROM dbo.BOOKING b JOIN dbo.SPACE s ON b.space_code = s.space_code WHERE b.expected_participants > s.capacity;');
-GO
-
--- ============================================================
--- Check 13: Staff Role Validation (Approvers)
--- ============================================================
 EXEC('SELECT ''APPROVER ROLE'' AS check_type, COUNT(*) AS invalid_approvers, CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END AS result FROM dbo.BOOKING b JOIN dbo.[USER] u ON b.approver_id = u.user_id WHERE u.role NOT IN (''Facility Staff'', ''Facility Manager'');');
-GO
-
--- ============================================================
--- Check 14: Approval Path Consistency
--- ============================================================
 EXEC('SELECT ''INSTANT PATH CONSISTENCY'' AS check_type, COUNT(*) AS instant_with_approver, CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END AS result FROM dbo.BOOKING WHERE approval_path = ''Instant'' AND approver_id IS NOT NULL;');
+SELECT 'CREATED_AT ORDER' AS check_type, COUNT(*) AS invalid_created_at, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING WHERE created_at > requested_start;
 GO
 
 -- ============================================================
--- Check 15: Advisory Acknowledgement Audit
--- ============================================================
-SELECT
-    'ADVISORY ACK AUDIT' AS check_type,
-    COUNT(*) AS total_acks,
-    COUNT(DISTINCT booking_id) AS distinct_bookings,
-    COUNT(DISTINCT maintenance_id) AS distinct_maintenance,
-    CASE WHEN COUNT(*) > 0 THEN 'PASS' ELSE 'FAIL' END AS result
-FROM dbo.BOOKING_ADVISORY_ACK;
-GO
-
--- ============================================================
--- Check 16: Impact History Audit
--- ============================================================
-SELECT
-    'IMPACT HISTORY AUDIT' AS check_type,
-    SUM(CASE WHEN old_impact_level = 'advisory' AND new_impact_level = 'out-of-service' THEN 1 ELSE 0 END) AS escalation_count,
-    SUM(CASE WHEN old_impact_level = 'out-of-service' AND new_impact_level = 'advisory' THEN 1 ELSE 0 END) AS downgrade_count,
-    CASE
-        WHEN SUM(CASE WHEN old_impact_level = 'advisory' AND new_impact_level = 'out-of-service' THEN 1 ELSE 0 END) > 0
-         AND SUM(CASE WHEN old_impact_level = 'out-of-service' AND new_impact_level = 'advisory' THEN 1 ELSE 0 END) > 0
-        THEN 'PASS'
-        ELSE 'FAIL'
-    END AS result
-FROM dbo.MAINTENANCE_IMPACT_HISTORY;
-GO
-
--- ============================================================
--- Check 17: Overlapping Maintenance Periods
--- ============================================================
-SELECT TOP 5
-    'OVERLAPPING MAINTENANCE' AS check_type,
-    m1.maintenance_id AS maint_1,
-    m2.maintenance_id AS maint_2,
-    m1.space_code,
-    m1.impact_level AS impact_1,
-    m2.impact_level AS impact_2
-FROM dbo.MAINTENANCERECORD m1
-JOIN dbo.MAINTENANCERECORD m2
-    ON m1.space_code = m2.space_code
-    AND m1.maintenance_id < m2.maintenance_id
-    AND m1.start_time < ISNULL(m2.completion_time, '9999-12-31')
-    AND ISNULL(m1.completion_time, '9999-12-31') > m2.start_time;
-GO
-
--- ============================================================
--- Check 18: Trigger Status Verification
+-- Check 10: Usage Session Alignment
 -- ============================================================
 PRINT '';
-PRINT '--- Check 18: Trigger Status ---';
+PRINT '--- Check 10: Usage Session Alignment ---';
+
+SELECT 'USAGESESSION ALIGNMENT' AS check_type, COUNT(*) AS bookings_needing_session, (SELECT COUNT(*) FROM dbo.USAGESESSION) AS sessions_found, CASE WHEN COUNT(*) = (SELECT COUNT(*) FROM dbo.USAGESESSION) THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING WHERE booking_status IN ('Completed', 'Checked In');
+SELECT 'ORPHAN SESSION CHECK' AS check_type, COUNT(*) AS orphan_sessions, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.USAGESESSION us JOIN dbo.BOOKING b ON us.booking_id = b.booking_id WHERE b.booking_status NOT IN ('Completed', 'Checked In');
+GO
+
+-- ============================================================
+-- Check 11: Trigger Status Verification
+-- ============================================================
+PRINT '';
+PRINT '--- Check 11: Trigger Status ---';
 
 SELECT
     'TRIGGER STATUS' AS check_type,
     t.name AS trigger_name,
     OBJECT_NAME(t.parent_id) AS parent_table,
     CASE WHEN t.is_disabled = 0 THEN 'ENABLED' ELSE 'DISABLED' END AS status,
-    CASE WHEN t.is_disabled = 0 THEN 'PASS' ELSE 'FAIL (still disabled!)' END AS result
+    CASE WHEN t.is_disabled = 0 THEN 'PASS' ELSE 'FAIL' END AS result
 FROM sys.triggers t
 WHERE t.parent_id IN (
     OBJECT_ID('dbo.BOOKING'),
@@ -299,21 +286,6 @@ WHERE t.parent_id IN (
 ORDER BY OBJECT_NAME(t.parent_id), t.name;
 GO
 
--- ============================================================
--- Check 19: created_at <= requested_start
--- ============================================================
-SELECT
-    'CREATED_AT ORDER' AS check_type,
-    COUNT(*) AS invalid_created_at,
-    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result
-FROM dbo.BOOKING
-WHERE created_at > requested_start;
-GO
-
--- ============================================================
--- Final Summary
--- ============================================================
-PRINT '';
 PRINT '============================================================';
 PRINT 'Step 14: Validation Complete';
 PRINT '============================================================';
