@@ -1,35 +1,45 @@
 ---
 name: data-generator-step14-review
-description: Review the Step 14 data generator output against the Phase 2 schema and determine whether the generated dataset is ready for Step 15 index tuning and Step 16 analytical queries.
+description: Review the Step 14 SQL Server data generator and validation scripts, then determine whether the generated dataset is ready for Step 15 indexing and query-tuning work.
 compatibility: opencode
 ---
 
 # Step 14 — Data Generator Review Skill
 
-Use this skill after `outputs/14-data-generator-G02/01-generate-data.sql` has been executed and `outputs/14-data-generator-G02/02-validate-data.sql` has been run.
+Use this skill after the Step 14 data-generation package has been created or updated.
 
-The review must determine whether the generated dataset faithfully covers all required scenarios, respects all schema constraints, achieves the required scale, and is suitable for meaningful index-tuning comparisons and analytical query testing.
+Expected package:
 
-Do not approve the dataset merely because it contains a large number of rows. Examine whether all required status values, approval paths, impact levels, and edge cases are represented and whether the data distribution provides enough selectivity variance for observable index effects.
+`outputs/14-data-generator-G02/`
+
+Expected files:
+
+- `01-generate-data.sql`
+- `02-validate-data.sql`
+
+The review must determine whether the generator can reproducibly create a sufficiently large, realistic, and internally consistent Phase 2 dataset, and whether the validation script proves that the dataset is suitable for analytical-query and index-tuning work.
+
+Do not approve the package merely because the scripts run or because the booking count reaches 100,000. Actively test whether the generated data covers the required business cases and whether the validation evidence is reliable.
 
 ---
 
 ## Review prompt
 
-Examine the Step 14 generator output and validation results critically and answer:
+Examine the complete Step 14 data-generation package critically and answer:
 
-> Is this dataset ready for Step 15 index tuning and Step 16 analytical queries without requiring the tester to regenerate data, repair constraint violations, add missing scenario coverage, or compensate for unrealistic distributions?
+> Is this data generator ready to support Step 15 indexing and query tuning without requiring manual repair, hidden assumptions, missing edge cases, unrealistic distributions, or unverified claims about data volume and quality?
 
-Compare the generated data against:
+Compare the package with:
 
-1. The complete Phase 2 requirements (`req/business-requirement-phase2.md`).
-2. The approved Step 9 design and Step 10 migration.
-3. The AGENTS.md §9 Step 14 requirements.
-4. The actual current SQL Server schema.
-5. The Step 14 generation skill, if available.
-6. The validation script output.
+1. The complete Phase 2 requirements.
+2. The approved Phase 1 schema.
+3. The Step 9 updated ERD and logical design.
+4. The Step 10 schema migration.
+5. The Step 11–13 concurrency design and implementation where relevant.
+6. The Step 14 generation skill, if available.
+7. The actual generated dataset, when a SQL Server runtime is available.
 
-If the dataset cannot support meaningful index comparisons, lacks required scenario coverage, or violates schema constraints, mark it as not ready.
+If the generator cannot create a clean dataset from the approved schema, does not include the required business cases, or cannot prove its own output through `02-validate-data.sql`, mark it as not ready.
 
 ---
 
@@ -37,12 +47,12 @@ If the dataset cannot support meaningful index comparisons, lacks required scena
 
 ### Required
 
-Review targets:
+Data-generation package:
 
 - `outputs/14-data-generator-G02/01-generate-data.sql`
 - `outputs/14-data-generator-G02/02-validate-data.sql`
 
-Approved design and schema inputs:
+Schema and design baseline:
 
 - `outputs/05-db-definition-G02.sql`
 - `outputs/09-updated-erd-and-logical-design-G02.md`
@@ -51,15 +61,17 @@ Approved design and schema inputs:
 Phase 2 requirement:
 
 - `req/business-requirement-phase2.md`
-- `AGENTS.md` (§9 Step 14 requirements)
+- Or the actual Phase 2 requirement file under `req/` or `docs/`
 
-### Optional
+### Relevant supporting artifacts
 
 Read when available:
 
-- Step 10 and Step 12 review files under `docs/`
+- `outputs/11-concurrency-design-G02.md`
+- `outputs/12-concurrency-implementation-G02.sql`
+- `outputs/13-concurrency-tests-G02/`
+- Relevant review files under `docs/`
 - `.opencode/skills/14-data-generator/SKILL.md`
-- Validation script execution output (if provided by user or captured in logs)
 
 ---
 
@@ -69,7 +81,7 @@ Create or update:
 
 `docs/14-data-generator-review-G02.md`
 
-Do not directly modify files under `outputs/14-data-generator-G02/` unless the user explicitly requests automatic correction.
+Do not directly modify the generator or validation scripts unless the user explicitly requests automatic correction.
 
 ---
 
@@ -78,197 +90,357 @@ Do not directly modify files under `outputs/14-data-generator-G02/` unless the u
 Before reviewing:
 
 1. Run `ls -la`.
-2. Verify that all required inputs exist.
-3. Read the complete generator SQL file and validation SQL file.
-4. If a SQL Server execution environment is available:
-   - Execute the generator script on a fresh database (after Step 5 + Step 10).
-   - Execute the validation script.
-   - Capture row counts and PASS/FAIL results.
-5. If execution is not available, perform a static review and clearly state that runtime behavior remains unverified.
-6. Base every issue on requirement evidence, schema mismatch, missing coverage, data integrity violation, or downstream testing risk.
-7. Distinguish:
+2. List every file under `outputs/14-data-generator-G02/`.
+3. Verify that both required SQL files exist.
+4. Read both files fully.
+5. Verify object and column names against the migrated schema.
+6. Distinguish:
    - Blocking issue
    - Major issue
    - Minor issue
    - Observation
-8. Do not require performance indexes in Step 14; those belong in Step 15.
-9. Do not treat comments as coverage when the actual data contradicts them.
+7. Do not infer successful generation from comments or expected-result text.
+8. If SQL Server execution is available, run the generator only in a safe disposable database.
+9. If execution is unavailable, perform a static review and mark runtime-dependent findings as unverified.
+10. Do not require exact distributions unless the requirement, design, or testing purpose justifies them.
+11. Do not reject reasonable synthetic data merely because it is not identical to real university data.
+12. Challenge unrealistic patterns when they would make index results misleading.
 
 ---
 
 # Review criteria
 
-## 1. Row count and scale verification
+## 1. Package completeness
+
+Verify that the package contains:
+
+- `01-generate-data.sql`
+- `02-validate-data.sql`
+
+Check whether:
+
+- Files are non-empty.
+- Sections are clearly organized.
+- Execution order is documented.
+- Required prerequisites are stated.
+- The generator and validator use the same data assumptions.
+- There are no unresolved placeholders.
+
+Report missing files, broken references, or undocumented dependencies.
+
+---
+
+## 2. Schema compatibility
+
+Verify every referenced:
+
+- Table
+- Column
+- Primary key
+- Foreign key
+- Check constraint
+- Status value
+- Approval-path value
+- Maintenance impact-level value
+- Advisory-acknowledgement structure
+
+against Steps 9 and 10 and the actual schema.
+
+Check especially:
+
+- `BOOKING`
+- `SPACE`
+- `FACILITY`
+- Space-facility relationship table
+- `MAINTENANCE_RECORD`
+- Advisory acknowledgement table or columns
+- User and staff references
+- Requested start and end times
+- Approval fields
+- Semester or academic-year representation
+
+A script that references nonexistent objects or invalid values is not ready.
+
+---
+
+## 3. Required data volume
+
+Verify that the generator produces at least:
+
+- Three academic years of data
+- 100,000 booking records
+
+Check whether:
+
+- Booking volume is measured after generation.
+- The count includes actual booking rows rather than staging rows.
+- Re-running the script does not accidentally double the dataset unless documented.
+- The validation script checks the exact required minimum.
+
+If runtime is available, record the observed booking count.
+
+---
+
+## 4. Required business-case coverage
+
+Verify that the generated data includes meaningful examples of:
+
+- Approved bookings
+- Pending bookings, when supported
+- Rejected bookings, when supported
+- Cancelled bookings
+- Completed bookings
+- No-show bookings
+- Instant approvals
+- Staff approvals
+- Maintenance records
+- Advisory maintenance
+- Out-of-service maintenance
+- Multiple active maintenance records for one space
+- Maintenance escalation or data supporting escalation testing
+- Advisory acknowledgements
+- Spaces with different capacities
+- Spaces with different facility combinations
+- Spaces with no matching facility combinations
+- Bookings distributed across multiple weekdays and hours
+- Bookings across multiple semesters and academic years
+
+Coverage must be large enough that analytical queries do not return trivial or empty results.
+
+---
+
+## 5. Temporal correctness
 
 Verify that:
 
-- `[USER]` has at least 400 rows.
-- `SPACE` has at least 50 rows.
-- `FACILITY` has at least 10 rows.
-- `SPACE_FACILITY` has at least 200 rows.
-- `MAINTENANCERECORD` has at least 3,000 rows.
-- `BOOKING` has at least 100,000 rows.
-- `USAGESESSION` has at least 50,000 rows.
-- `BOOKING_ADVISORY_ACK` has at least 5,000 rows.
-- `MAINTENANCE_IMPACT_HISTORY` has at least 500 rows.
+- `requested_start < requested_end`
+- Approval or decision time is not earlier than creation time, when both are present
+- Actual check-in and check-out times are logically ordered
+- Maintenance start is earlier than completion when completion exists
+- Open maintenance uses the approved null or open-ended representation
+- Semester and academic-year dates are internally consistent
+- Booking times fall within the intended academic period
+- No impossible dates are generated
+- Boundary cases exist where useful
 
-Report exact row counts.
+Report temporal combinations that violate constraints or make reports unreliable.
 
 ---
 
-## 2. Academic year coverage
+## 6. Referential integrity and domain validity
 
 Verify that:
 
-- Booking `requested_start` dates span at least 3 distinct academic years.
-- The date range covers approximately September 2023 to May 2026.
-- Bookings are distributed across Fall, Spring, and Summer semesters.
-- The distribution is not concentrated in a single month or year.
+- Every booking references an existing requester and space.
+- Every approval staff reference exists and has a suitable role when required.
+- Every maintenance reporter and assigned staff reference exists where required.
+- Every space-facility row references existing records.
+- Every advisory acknowledgement references valid booking and maintenance records.
+- Status and impact values satisfy check constraints.
+- Unique keys are not duplicated.
+- Required fields are not null.
+- Generated values fit declared data types and lengths.
+
+The generator must not depend on disabling foreign keys or check constraints.
 
 ---
 
-## 3. Enum and domain value coverage
-
-For each CHECK-constrained column, verify that every allowed value appears at least once:
-
-- `USER.role`: Student, Lecturer, Teaching Assistant, Facility Staff, Department Administrator, Facility Manager
-- `USER.account_status`: Active, Suspended, Inactive
-- `SPACE.space_type`: Auditorium, Classroom, Computer Laboratory, Project Laboratory, Meeting Room, Student Workspace
-- `SPACE.current_status`: Available, In Use, Under Maintenance, Temporarily Closed, Retired
-- `SPACE_FACILITY.operation_status`: Operational, Partially Operational, Broken
-- `BOOKING.booking_status`: Pending, Approved, Rejected, Cancelled, Checked In, Completed, No-Show
-- `BOOKING.purpose`: Lecture, Examination, Seminar, Workshop, Meeting, Student Activity, Administrative Event
-- `BOOKING.approval_path`: Instant, Staff
-- `MAINTENANCERECORD.maintenance_status`: Reported, In Progress, Resolved, Cancelled
-- `MAINTENANCERECORD.problem_type`: Projector Failure, Air-Conditioning Issue, Cleaning Issue, Furniture Damage, Network Issue, Other
-- `MAINTENANCERECORD.impact_level`: advisory, out-of-service
-- `MAINTENANCE_IMPACT_HISTORY.old_impact_level`: advisory, out-of-service
-- `MAINTENANCE_IMPACT_HISTORY.new_impact_level`: advisory, out-of-service
-
-Report any missing values.
-
----
-
-## 4. Scenario coverage
-
-Verify that the dataset includes:
-
-- Bookings with instant approval (approver_id IS NULL, approval_path = 'Instant').
-- Bookings with staff approval (approver_id IS NOT NULL, approval_path = 'Staff').
-- Rejected bookings with non-NULL rejection_reason.
-- Cancelled bookings.
-- No-Show bookings.
-- Completed bookings with corresponding USAGESESSION records.
-- Checked In bookings with corresponding USAGESESSION records (no check-out yet).
-- Advisory maintenance records overlapping with bookings.
-- Out-of-service maintenance records.
-- Overlapping maintenance periods on the same space.
-- Escalation events (advisory → out-of-service) in MAINTENANCE_IMPACT_HISTORY.
-- Downgrade events (out-of-service → advisory) in MAINTENANCE_IMPACT_HISTORY.
-- Advisory acknowledgement records in BOOKING_ADVISORY_ACK linking bookings to maintenance.
-- Usage sessions with both check-in and check-out (Completed) and check-in only (Checked In).
-
----
-
-## 5. Data integrity verification
+## 7. Booking-conflict validity
 
 Verify that:
 
-- All FK references resolve to existing PK values.
-- `expected_participants <= capacity` for every booking (join BOOKING to SPACE).
-- `requested_end > requested_start` for every booking.
-- `completion_time > start_time` for every maintenance record with non-NULL completion_time.
-- `rejection_reason IS NOT NULL` for every booking with `booking_status = 'Rejected'`.
-- `approver_id` references a user with role `Facility Staff` or `Facility Manager` (when not NULL).
-- `check_in_staff_id` and `check_out_staff_id` reference users with staff/manager roles.
-- `assigned_staff_id` references a user with staff/manager role (when not NULL).
-- Every `Completed` or `Checked In` booking has exactly one USAGESESSION.
-- No `Pending`, `Rejected`, `Cancelled`, or `No-Show` booking has a USAGESESSION.
-- `BOOKING_ADVISORY_ACK.booking_id` and `maintenance_id` reference valid records.
-- `MAINTENANCE_IMPACT_HISTORY` `changed_by_user_id` references valid user records.
+- Two `Approved` bookings do not overlap for the same space.
+- Overlapping pending, rejected, or cancelled requests may exist when useful and allowed.
+- Non-overlapping bookings for the same space are present.
+- Overlapping bookings for different spaces are present.
+- Adjacent intervals are present where useful.
+
+The validation script should contain a conflict-detection query using:
+
+```sql
+b1.requested_start < b2.requested_end
+AND b1.requested_end > b2.requested_start
+```
+
+Expected result for approved conflicts:
+
+`0 rows`
+
+Do not accept a validator that checks only duplicate start times.
 
 ---
 
-## 6. Selectivity and index-observability
-
-Verify that the data has enough variance for Step 15 index tuning:
-
-- Some space codes have many bookings (high frequency / low selectivity).
-- Some space codes have few bookings (low frequency / high selectivity).
-- Bookings spread across multiple space types with different frequencies.
-- Time-of-day distribution includes both peak and off-peak hours.
-- Facility combinations vary across spaces.
-- Maintenance records are distributed unevenly across spaces (some spaces have many, some have few).
-
----
-
-## 7. Trigger safety
+## 8. Maintenance and acknowledgement consistency
 
 Verify that:
 
-- All triggers listed in Step 5 are explicitly disabled before data insertion.
-- All triggers are explicitly re-enabled after data insertion.
-- No trigger is left disabled at the end of the script.
-- The script names every trigger being disabled and enabled.
-- The generated data would not cause trigger violations if triggers were active (business rules are enforced programmatically).
+- Advisory maintenance does not automatically make the space unbookable.
+- Out-of-service maintenance is represented correctly.
+- Approved bookings overlapping out-of-service maintenance are either intentional escalation-affected cases or clearly separated from invalid generated states.
+- Advisory acknowledgements correspond to advisories active at booking time according to the approved design.
+- A booking can acknowledge multiple advisories when required.
+- Acknowledgement rows are not duplicated without justification.
+- Maintenance escalation cases can be found by the required analytical query.
+
+The validator should separately report:
+
+- Advisory count
+- Out-of-service count
+- Acknowledgement count
+- Bookings linked to multiple advisories
+- Escalation-affected approved bookings
 
 ---
 
-## 8. Idempotency and re-run safety
+## 9. Distribution realism for index testing
 
-Verify that:
+Evaluate whether the generated distributions are sufficiently realistic to make before-and-after index comparisons meaningful.
 
-- The script cleans all existing data before inserting.
-- Cleanup follows reverse FK dependency order.
-- Identity seeds are reset before generation.
-- Re-running the script produces a consistent dataset.
-- No duplicate key violations occur on re-run.
+Check for:
+
+- Several spaces rather than nearly all bookings assigned to one space
+- Popular and less-popular spaces
+- Different booking densities by semester
+- Different booking densities by weekday and hour
+- Meaningful variation in capacity
+- Meaningful facility combinations
+- Selective room-finder results
+- A nontrivial proportion of approved bookings
+- Some maintenance and acknowledgement rows without overwhelming the booking table
+- Enough repeated values for indexes to matter
+- Enough selectivity for indexed predicates to produce different plans
+
+Report distributions that would make tuning results misleading.
 
 ---
 
-## 9. Execution performance
+## 10. Generator quality and efficiency
 
-Verify or report that:
+Verify that `01-generate-data.sql`:
 
-- The generator completes in under 60 seconds on the target SQL Server.
-- No cursor-based row-by-row insertion is used for large tables.
-- Temp tables are created and dropped cleanly.
-- Memory consumption is reasonable (batched inserts for very large tables).
+- Is rerunnable or clearly documents one-time execution.
+- Avoids accidental duplicate generation.
+- Uses a scalable set-based approach where practical.
+- Avoids unnecessary row-by-row loops for 100,000+ bookings.
+- Does not rely on undocumented temporary objects.
+- Does not leave temporary tables or transactions behind.
+- Uses deterministic or documented randomization.
+- Avoids unbounded loops.
+- Handles identity values safely.
+- Preserves existing data or clearly documents reset behavior.
+- Does not delete unrelated project data.
+
+A slower generator is not automatically incorrect, but severe scalability problems may block performance testing.
 
 ---
 
-## 10. Step 15/16 readiness examination
+## 11. Validation-script quality
+
+Verify that `02-validate-data.sql` independently checks the generated result.
+
+It should report at least:
+
+1. Total booking count
+2. Minimum and maximum booking dates
+3. Number of distinct academic years or semesters
+4. Counts by booking status
+5. Counts by approval path
+6. Counts by weekday and hour
+7. Counts by space
+8. Maintenance count by impact level
+9. Advisory acknowledgement count
+10. Null and orphan checks
+11. Invalid time-range checks
+12. Approved overlap invariant
+13. Out-of-service overlap analysis
+14. Facility and capacity coverage
+15. Row counts for major Phase 2 tables
+
+Each check should have:
+
+- A clear label
+- Actual observed result
+- Expected threshold or condition
+- Pass/fail interpretation where practical
+
+Do not accept a validator that only displays total row counts.
+
+---
+
+## 12. Clean execution validation
+
+When a SQL Server runtime is available, use a disposable database and run:
+
+1. Step 5 schema
+2. Step 10 migration
+3. Step 12 implementation if required
+4. `01-generate-data.sql`
+5. `02-validate-data.sql`
+
+Record:
+
+- Whether each script completed
+- Runtime errors
+- Actual booking count
+- Date range
+- Major status counts
+- Approved-conflict count
+- Invalid foreign-key or null count
+- Whether a second generator run is safe
+- Approximate generation time only when actually measured
+
+Do not manually repair the schema between steps.
+
+When runtime is unavailable, state:
+
+`The generator and validation scripts were reviewed statically; generated row counts and runtime behavior remain unverified.`
+
+---
+
+## 13. Step 15 readiness examination
 
 Answer explicitly:
 
-1. Does the dataset contain enough approved bookings to test the booking-conflict-check query?
-2. Does the dataset contain enough spaces with varied facility sets to test the room-finder query?
-3. Are there enough completed bookings across multiple semesters for the total-hours report?
-4. Are there enough bookings distributed by weekday and hour for the weekday/hour report?
-5. Are there enough out-of-service maintenance escalations with overlapping approved bookings for Report 4?
-6. Is the dataset large enough for index scan vs. seek differences to be observable?
-7. Are the data distributions varied enough for non-trivial query results?
+1. Does the package create at least 100,000 bookings?
+2. Does it cover at least three academic years?
+3. Are required booking statuses represented?
+4. Are both approval paths represented?
+5. Are maintenance impact levels represented?
+6. Are advisory acknowledgements represented?
+7. Are approved-booking conflicts absent except for documented escalation cases?
+8. Does the room-finder query have meaningful capacity and facility variation?
+9. Do the analytical queries return nontrivial result sets?
+10. Are distributions suitable for before-and-after index comparison?
+11. Can the package be rerun safely?
+12. Does the validation script prove the required properties?
+13. Would Step 15 need manual data repair or hidden inserts?
+14. Are any blocking issues unresolved?
+
+Then provide:
+
+- **Ready elements**
+- **Blocking gaps**
+- **Non-blocking improvements**
 
 ---
 
-## 11. Quality assessment
+## 14. Quality assessment
 
-Assign 0–10:
+Assign a score from 0 to 10:
 
 | Category | Evaluation focus |
-|---|---|
-| Scale | Row counts meet or exceed all minimums |
-| Academic Coverage | Three academic years with realistic semester distribution |
-| Enum Coverage | Every CHECK constraint value is represented |
-| Scenario Coverage | All required scenarios are present and identifiable |
-| Data Integrity | All FK, CHECK, and business-rule constraints are satisfied |
-| Selectivity | Enough variance for observable index effects |
-| Trigger Safety | All triggers correctly disabled and re-enabled |
-| Idempotency | Safe to re-run without manual cleanup |
-| Performance | Executes within time budget |
-| Step 15/16 Readiness | Dataset supports meaningful tuning and analytical queries |
+| --- | --- |
+| Completeness | Both scripts and required sections exist |
+| Schema Compatibility | Scripts match the migrated schema |
+| Data Volume | Required row count and time span are met |
+| Business Coverage | Required statuses, maintenance, and acknowledgements exist |
+| Integrity | Keys, constraints, domains, and temporal rules are valid |
+| Distribution Quality | Data supports meaningful query tuning |
+| Generator Quality | Script is safe, scalable, and reproducible |
+| Validation Quality | Validator independently proves dataset properties |
+| Step 15 Readiness | Dataset can support index and performance analysis |
 
-Do not inflate scores because the script is long or generates many rows.
+Do not inflate scores because the SQL is long or generates many rows.
 
 ---
 
@@ -279,34 +451,53 @@ Do not inflate scores because the script is long or generates many rows.
 State:
 
 - What was reviewed
-- Whether runtime execution was performed
+- Whether runtime generation was performed
+- Observed booking count, if executed
 - Most important strength
 - Most important risk
-- Readiness for Step 15/16
+- Overall Step 15 readiness
 
-# 2. Documents Reviewed
+# 2. Files Reviewed
 
-# 3. Row Count Audit
+List every file in `outputs/14-data-generator-G02/`.
 
-| Table | Required Minimum | Actual Count | Status |
-|---|---|---|---|
+# 3. Requirement Coverage
 
-# 4. Enum Coverage Audit
+| Requirement | Required | Generated or Checked | Evidence | Status |
+| --- | --- | --- | --- | --- |
 
-| Column | Required Values | Missing Values | Status |
-|---|---|---|---|
+Include at least:
 
-# 5. Scenario Coverage Audit
+- Three academic years
+- 100,000 bookings
+- Maintenance
+- Cancellations
+- No-shows
+- Advisory acknowledgements
+- Approval paths
+- Reporting-data variation
 
-| Scenario | Present? | Evidence |
-|---|---|---|
+# 4. Schema and Integrity Check
 
-# 6. Data Integrity Check
+| Area | Expected | Actual or Static Finding | Status | Notes |
+| --- | --- | --- | --- | --- |
 
-| Check | Result | Details |
-|---|---|---|
+# 5. Data Distribution Review
 
-# 7. Issues Found
+Report:
+
+- Counts by status
+- Counts by approval path
+- Counts by academic year or semester
+- Counts by weekday and hour
+- Booking concentration by space
+- Maintenance distribution
+- Acknowledgement distribution
+- Capacity and facility variation
+
+Clearly label values as observed or expected.
+
+# 6. Issues Found
 
 For each issue:
 
@@ -316,33 +507,40 @@ For each issue:
 - **Issue:**
 - **Evidence:**
 - **Why this is a problem:**
-- **Downstream impact on Step 15/16:**
+- **Impact on Step 15:**
 - **Suggested correction:**
 
-# 8. Scores
+# 7. Validation Script Assessment
+
+State which required checks are present, missing, correct, or unreliable.
+
+# 8. Step 15 Readiness Examination
+
+Answer all readiness questions explicitly.
+
+# 9. Scores
 
 | Category | Score |
-|---|---|
-| Scale | X/10 |
-| Academic Coverage | X/10 |
-| Enum Coverage | X/10 |
-| Scenario Coverage | X/10 |
-| Data Integrity | X/10 |
-| Selectivity | X/10 |
-| Trigger Safety | X/10 |
-| Idempotency | X/10 |
-| Performance | X/10 |
-| Step 15/16 Readiness | X/10 |
+| --- | --- |
+| Completeness | X/10 |
+| Schema Compatibility | X/10 |
+| Data Volume | X/10 |
+| Business Coverage | X/10 |
+| Integrity | X/10 |
+| Distribution Quality | X/10 |
+| Generator Quality | X/10 |
+| Validation Quality | X/10 |
+| Step 15 Readiness | X/10 |
 
-# 9. Required Revisions Before Step 15
+# 10. Required Revisions Before Step 15
 
-List only revisions required before index tuning and analytical queries.
+List only revisions required before index tuning begins.
 
 If none:
 
 `No blocking revisions are required before Step 15.`
 
-# 10. Final Readiness Verdict
+# 11. Final Readiness Verdict
 
 Choose exactly one:
 
@@ -360,6 +558,8 @@ After creating the review:
 
 1. State that `docs/14-data-generator-review-G02.md` was created or updated.
 2. State the final readiness verdict.
-3. Summarize only blocking and major issues.
-4. Do not generate Step 15 or Step 16 artifacts automatically.
-5. If not ready, instruct the user to revise the generator first.
+3. State whether the generator was executed or reviewed statically.
+4. Report the observed booking count and academic-year span when available.
+5. Summarize only blocking and major issues.
+6. Do not modify the data generator automatically.
+7. Do not proceed to Step 15 automatically.
