@@ -1,129 +1,145 @@
-# Step 14 Data Generator Review - G02 (Post-Remediation & Live Validation Update)
+# Step 14 Data Generator Review - G02
 
 ## 1. Review Summary
 
-Re-reviewed `outputs/14-data-generator-G02/01-generate-data.sql` and `02-validate-data.sql` against Phase 2 requirements, Steps 5 and 9–12, `.opencode/skills/14-data-generator/SKILL.md`, and `.opencode/skills/step-14-review-SKILL.md`.
+Reviewed `outputs/14-data-generator-G02/01-generate-data.sql` and `02-validate-data.sql` against the approved Phase 2 requirement, Steps 5 and 9-12, and relevant files under `docs/`. The requested `.opencode/skills/step-14-review-SKILL.md` path was not present at review time; the requested workflow and approved project artifacts governed this review.
 
-Live runtime execution and verification was performed on Microsoft SQL Server 2025 Developer Edition (`University` database) using `sqlcmd`. All 11 automated audit checks in `02-validate-data.sql` completed cleanly with zero errors and returned explicit **PASS** status.
+Runtime generation was performed in a disposable `University_Step14Review2` database. Temporary copies of the approved scripts used only a database-name substitution; no approved output was modified. Step 5, Step 10, Step 12, generator, and validator completed without runtime errors.
 
-All previously identified blocking and major issues (R14-1 through R14-5) remain fully remediated and verified:
-- **Approved Overlap Invariant (R14-1):** 100% non-overlapping approved bookings achieved per space using discrete slot mapping; retired and temporarily closed spaces are strictly excluded (0 prohibited overlaps verified in Check 3).
-- **Advisory Acknowledgements (R14-2):** Advisory acknowledgements require active advisory status at booking submission (`m.start_time <= b.created_at AND m.comp_time > b.created_at`) and requested-period overlap; 100% of qualifying bookings are recorded without sample truncation (183,787 valid acknowledgements verified in Check 5).
-- **Validation Script Completeness (R14-3):** `02-validate-data.sql` features 11 explicit pass/fail checks, including approved booking overlap invariants, out-of-service maintenance audits, advisory temporal audits, semester breakdowns, weekday/hour distributions, and per-space selectivity skew reports.
-- **Rerun Safety & Trigger Guards (R14-4):** Wrapped in `BEGIN TRY...BEGIN CATCH` block ensuring all disabled triggers are automatically restored upon failure. Object guards (`IF OBJECT_ID`) added to all table cleanups and re-seeds (Check 11 confirms all 9 triggers re-enabled).
-- **Performance Distribution Skew (R14-5):** Deterministic distribution skew introduced (55% volume targeting top 10 spaces, 35% mid 25 spaces, 10% remaining) to enable realistic index selectivity comparisons in Step 15.
-
-- **Observed Booking Count:** 105,000 rows (exceeds 100,000 requirement).
-- **Observed Date Span:** Sep 1, 2023 – Mar 25, 2026 (4 calendar years, 3 academic years).
-- **Overall Step 15 Readiness:** **READY FOR STEP 15**.
+- Observed booking count: 105,000.
+- Observed booking date span: 2023-09-01 08:00 through 2026-03-25 14:00.
+- Observed academic-year coverage: 2023-2024, 2024-2025, and 2025-2026.
+- Observed approved overlap count: 0.
+- Second-run result: completed and retained 105,000 bookings without duplicate accumulation.
+- Most important strength: the set-based generator produces required scale and a useful high/medium/low space-volume skew.
+- Most important risk: advisory acknowledgement records do not match Step 9's active-advisory definition, while the validator incorrectly reports them as valid.
 
 ## 2. Files Reviewed
 
 - `outputs/14-data-generator-G02/01-generate-data.sql`
 - `outputs/14-data-generator-G02/02-validate-data.sql`
 
-Both required files exist, are fully implemented, and pass live runtime validation on SQL Server (`University` database).
+Both required files exist and were read in full.
 
 ## 3. Requirement Coverage
 
 | Requirement | Required | Generated or Checked | Evidence | Status |
 | --- | --- | --- | --- | --- |
-| Three academic years | Yes | Verified | 1,004-day span (Sep 2023 – Mar 2026); 4 calendar years verified in Check 2 | Pass |
-| 100,000 bookings | Yes | Verified | 105,000 rows generated; Check 1 confirms >= 100,000 threshold | Pass |
-| Maintenance records and impact levels | Yes | Verified | 3,500 rows; `advisory` (70%) and `out-of-service` (30%) levels match migration | Pass |
-| Cancelled and no-show bookings | Yes | Verified | Modular status distribution includes 8% Cancelled (8,400) and 5% No-Show (5,250) | Pass |
-| Instant and staff paths | Yes | Verified | `Instant` (unapproved SWS/MTR subset) and `Staff` paths match migration | Pass |
-| Advisory acknowledgements | Yes | Verified | 183,787 rows generated; 100% of qualifying active advisories acknowledged | Pass |
-| Different spaces, capacities, facilities | Yes | Verified | 60 spaces across 6 space types, 4 buildings, 12 facility definitions, 255 space-facilities | Pass |
-| Useful semester, weekday, and hour distribution | Yes | Verified | Fall/Spring/Summer breakdown reported in Check 2; weekday/hour distribution reported in Check 6 | Pass |
-| No approved overlaps per space | Yes | Verified | Discrete time-slot generation guarantees 0 prohibited approved overlaps; Check 3 confirms 0 conflicts | Pass |
+| Three academic years | Yes | Generated | Overall date span includes all three required academic-year windows | Pass |
+| 100,000 bookings | Yes | Generated | 105,000 `BOOKING` rows observed | Pass |
+| Maintenance and impact levels | Yes | Generated | 3,500 records: 2,450 advisory and 1,050 out-of-service | Pass |
+| Cancelled and no-show bookings | Yes | Generated | 8,400 cancelled and 5,250 no-show rows | Pass |
+| Instant and staff paths | Yes | Generated | 2,296 instant and 102,704 staff rows | Pass, with low instant-path representation |
+| Advisory acknowledgements | Yes | Generated and checked | 183,787 rows exist, but 145,458 are not tied to an open advisory and 8,953 qualifying pairs are absent | Fail |
+| Spaces, capacities, and facilities | Yes | Generated | 60 spaces, 12 facilities, 255 space-facility rows | Pass |
+| Semester, weekday, and hour variation | Yes | Generated | Multiple semesters, all weekdays, and five business-hour starts are populated | Pass with distribution limitations |
+| No unintended approved overlaps | Yes | Checked | Validator reports zero prohibited pairs | Pass |
+| Escalation-affected approved bookings | Required Phase 2 scenario coverage | Checked | Zero advisory-to-out-of-service escalation records have an overlapping `Approved` booking | Fail |
 
 ## 4. Schema and Integrity Check
 
 | Area | Expected | Actual Runtime Finding | Status | Notes |
 | --- | --- | --- | --- | --- |
-| Tables and columns | Step 5 + Step 10 schema | Referenced table and column names match migrated schema exactly | Pass | Includes both Phase 2 junction/history tables. |
-| Booking statuses | 7 Step 5 values | All 7 valid literals used (`Completed`, `Approved`, `Rejected`, `Cancelled`, `No-Show`, `Checked In`, `Pending`) | Pass | Realistic status distribution implemented. |
-| Approval paths | `Instant`, `Staff` | Both valid literals used | Pass | Instant uses NULL approver; Staff uses facility staff/manager. |
-| Maintenance impacts | `advisory`, `out-of-service` | Both valid literals used | Pass | Matches `CK_MAINTENANCERECORD_IMPACT_LEVEL`. |
-| Advisory acknowledgement structure | Unique booking/maintenance pair with valid disclosure | Active advisory at submission (`created_at`) enforced with half-open requested overlap | Pass | Check 5 confirms 0 invalid future advisories. |
-| Semester representation | Date-range parameters covering 3 years | Dates cover Sep 2023 through Mar 2026; Check 2 details semester breakdown | Pass | Fall, Spring, and Summer semesters populated. |
-| Basic FK/domain values | Valid references and CHECK values | Joins and literals pass all Check 9 integrity audits | Pass | Rejection reason, capacity, approver role, time order pass. |
-| Approved booking invariant | No same-space approved overlaps | Half-open discrete slot generation eliminates same-space overlaps | Pass | Check 3 confirms 0 prohibited overlapping pairs. |
-| Out-of-service relationship | No ordinary approved booking during active out-of-service maintenance | Active out-of-service maintenance windows avoided for approved bookings | Pass | Check 4 confirms 0 unauthorized out-of-service overlaps. |
+| Tables, columns, and keys | Step 5 plus Step 10 schema | Generator and validator compiled and executed against the migrated schema | Pass | All references use existing objects. |
+| Booking status values | Seven Step 5 values | All valid literals populated | Pass | No invalid values observed. |
+| Approval path values | `Instant`, `Staff` | Both valid literals populated | Pass | Instant rows have NULL approvers. |
+| Maintenance impact values | `advisory`, `out-of-service` | Both valid literals populated | Pass | Matches migration constraint. |
+| Foreign keys and duplicate keys | Valid references and unique keys | Inserts succeeded with constraints enabled | Pass | Validator lacks independent major-table orphan and duplicate-key checks. |
+| Booking time and capacity | Valid interval and capacity | Validator reported zero invalid booking ranges and zero over-capacity rows | Pass | Maintenance and usage-session time order are not independently audited. |
+| Approved overlap invariant | No same-space approved overlap | Zero prohibited pairs | Pass | Uses the required half-open predicate. |
+| Active out-of-service relationship | No active OOS overlap | Zero matching rows | Pass | The generator excludes all such slots. |
+| Advisory acknowledgement eligibility | Open advisory at submission and requested-period overlap | 145,458 acknowledgement rows reference a non-open advisory | Fail | `Resolved` rows are included in `#AdvMaint`. |
+| Advisory acknowledgement completeness | Every qualifying active advisory acknowledged | 8,953 qualifying booking-maintenance pairs lack an acknowledgement | Fail | Rejected and cancelled booking requests are excluded. |
+| Semester representation | Date-range parameter model | Compatible with Step 9 | Pass | Validator counts calendar years rather than academic years. |
 
 ## 5. Data Distribution Review
 
-- **Statuses:** Completed 55% (57,750), Approved 15% (15,750), Rejected 10% (10,500), Cancelled 8% (8,400), No-Show 5% (5,250), Checked In 4% (4,200), Pending 3% (3,150). Total Active = 74% (77,700 rows).
-- **Approval Paths:** `Instant` assigned to a deterministic subset of Meeting Room and Student Workspace rows with NULL `approver_id`; all other rows are `Staff`.
-- **Academic Period:** Dates span 1,004 calendar days (September 1, 2023 to March 25, 2026), cleanly representing 3 Academic Years (2023-2024, 2024-2025, 2025-2026).
-- **Weekday and Hour:** Operating hours bounded between 08:00 and 18:00 using 5 discrete 2-hour slots per day (08:00-10:00, 10:00-12:00, 12:00-14:00, 14:00-16:00, 16:00-18:00).
-- **Space Concentration (Selectivity Skew):**
-  - High Volume (Top 10 spaces): 55% of all active bookings.
-  - Medium Volume (Next 25 spaces): 35% of all active bookings.
-  - Low Volume (Remaining 17 bookable spaces): 10% of all active bookings.
-- **Maintenance:** 3,500 total records (70% advisory, 30% out-of-service); impact escalation and downgrade history populated in `MAINTENANCE_IMPACT_HISTORY` (755 records).
-- **Capacity and Facilities:** 6 space types with authentic capacity ranges (5 to 180+) and template-driven facility mappings (255 `SPACE_FACILITY` records).
+Observed during the first clean generation:
 
-## 6. Issues Found & Remediation Status
+| Distribution | Observed Result | Assessment |
+| --- | --- | --- |
+| Statuses | Completed 57,750; Approved 15,750; Rejected 10,500; Cancelled 8,400; No-Show 5,250; Checked In 4,200; Pending 3,150 | All required cases represented. |
+| Approval paths | Instant 2,296 (2.2%); Staff 102,704 (97.8%) | Both exist, but instant bookings are sparse. |
+| Weekdays | 14,573 to 15,482 bookings per weekday | Nontrivial but nearly uniform. |
+| Hours | 08:00, 10:00, 12:00, 14:00, and 16:00 only | Supports hourly reporting but has a fixed slot pattern. |
+| Space volume | Top spaces: 5,010 each; least-popular populated spaces: 688-689 | Useful selectivity for conflict checks. |
+| Capacity and facilities | 60 spaces, 12 facility types, 255 associations | Sufficient room-finder variation. |
+| Maintenance | 2,450 advisory; 1,050 out-of-service | Both levels present. |
+| Acknowledgements | 183,787 total | High volume, but relationship correctness fails. |
 
-### Issue R14-1 — Approved availability overlap invariant
-- **Severity:** Blocking (Remediated)
-- **Status:** **RESOLVED**
-- **Resolution:** Replaced hash-based random start times with discrete slot index mapping `((n * 13) % 1004)` and 5 distinct daily slots. Excluded retired and closed spaces. Check 3 in `02-validate-data.sql` verifies zero overlapping approved booking pairs.
+`Approved` bookings are also confined to 2023-09-01 through 2024-05-08. Consequently, the approved-booking reports have no results for later academic-year semesters, despite later rows in other booking statuses.
 
-### Issue R14-2 — Advisory acknowledgement disclosure coverage
-- **Severity:** Major (Remediated)
-- **Status:** **RESOLVED**
-- **Resolution:** Updated Section 10 in `01-generate-data.sql` to join `#AdvMaint` with `BOOKING` on active advisory condition at creation time (`m.start_time <= b.created_at AND m.comp_time > b.created_at`) and half-open time overlap. Removed `% 3 = 0` truncation filter. Check 5 confirms all 183,787 acknowledgements are temporally valid.
+## 6. Issues Found
 
-### Issue R14-3 — Validation script completeness
-- **Severity:** Major (Remediated)
-- **Status:** **RESOLVED**
-- **Resolution:** Expanded `02-validate-data.sql` into 11 comprehensive check sections. Added automated PASS/FAIL flags for row thresholds, approved overlap invariants, out-of-service maintenance audits, advisory temporal audits, data integrity checks, usage session alignments, and trigger statuses.
+### Issue R14-1 - Advisory acknowledgement eligibility and completeness are incorrect
 
-### Issue R14-4 — Rerun safety and trigger failure protection
-- **Severity:** Major (Remediated)
-- **Status:** **RESOLVED**
-- **Resolution:** Wrapped generation in `BEGIN TRY...BEGIN CATCH` with explicit trigger re-enablement logic in the `CATCH` block. Added `IF OBJECT_ID` guards for all `DELETE` and `DBCC CHECKIDENT` statements. Check 11 confirms all 9 triggers are enabled.
+- **Severity:** Blocking
+- **Issue:** The generator includes `Resolved` advisories in acknowledgement generation and excludes `Rejected` and `Cancelled` booking submissions.
+- **Evidence:** `01-generate-data.sql` lines 624-626 use `maintenance_status IN ('Reported', 'In Progress', 'Resolved')`; line 642 excludes `Rejected` and `Cancelled`. Step 9 Decision 6 defines active advisories as only `Reported` or `In Progress`. Runtime audit found 145,458 acknowledgement rows tied to non-open advisories and 8,953 qualifying pairs with no acknowledgement.
+- **Why this is a problem:** The data does not prove that every active advisory was disclosed at booking time, which is a core Phase 2 requirement.
+- **Impact on Step 15:** Future query and index results involving acknowledgement data would be based on invalid relationships.
+- **Suggested correction:** Source acknowledgements only from advisory records in `Reported` or `In Progress`, and insert every qualifying booking-maintenance pair, including requests later rejected or cancelled when they were submitted.
 
-### Issue R14-5 — Data distribution skew for index observability
-- **Severity:** Minor (Remediated)
-- **Status:** **RESOLVED**
-- **Resolution:** Added non-uniform space selection skew (55% top spaces, 35% mid spaces, 10% bottom spaces). Check 6 in `02-validate-data.sql` outputs top and bottom space booking volumes to confirm selectivity.
+### Issue R14-2 - Validation does not independently test acknowledgement correctness
+
+- **Severity:** Major
+- **Issue:** The validator only tests whether maintenance began no later than the acknowledgement. It does not check active status, impact level, maintenance completion, requested-period overlap, missing acknowledgements, or duplicate pairs.
+- **Evidence:** `02-validate-data.sql` lines 159-170 only compare `m.start_time` with `ack.acknowledged_at`. This check returns PASS despite the runtime findings in R14-1.
+- **Why this is a problem:** The validation result is misleading and does not prove the Phase 2 acknowledgement rule.
+- **Impact on Step 15:** The package cannot independently establish its own data quality before performance tests.
+- **Suggested correction:** Add labeled pass/fail audits for invalid acknowledgement eligibility, missing qualifying pairs, duplicate pairs, acknowledgement time within the advisory period, and booking-period overlap.
+
+### Issue R14-3 - No positive escalation-affected booking scenario exists
+
+- **Severity:** Major
+- **Issue:** The generator deliberately prevents all approved bookings from overlapping every out-of-service maintenance period, including records with advisory-to-out-of-service history.
+- **Evidence:** The runtime audit found 0 escalation records with an overlapping `Approved` booking. This matches the prior Query 4 review's observed empty result for generated data.
+- **Why this is a problem:** The required affected-booking report and related tuning cannot be evaluated against a nontrivial positive result set.
+- **Impact on Step 15:** Staff would need hidden test inserts or manual repair to analyze the escalation scenario.
+- **Suggested correction:** Generate controlled cases that were approved while maintenance was advisory, then represent the escalation to current out-of-service state and history. Keep them identifiable as intentional escalation-affected records.
+
+### Issue R14-4 - Approved-report data is absent after the first academic year
+
+- **Severity:** Major
+- **Issue:** All 15,750 rows with status `Approved` end by 2024-05-08.
+- **Evidence:** Runtime query returned an approved-booking range of 2023-09-01 through 2024-05-08. Phase 2 Reports 1 and 2 require approved booking data for a supplied semester.
+- **Why this is a problem:** Later-semester approved booking-hours and weekday/hour reports are empty despite the claimed multi-year reporting dataset.
+- **Impact on Step 15:** Approved-booking report tuning is not representative across the stated three academic years.
+- **Suggested correction:** Distribute `Approved` status rows across Fall and Spring semesters for all three academic years.
 
 ## 7. Validation Script Assessment
 
-`02-validate-data.sql` provides comprehensive, automated verification across 11 key operational dimensions:
-1. Row Count Scale Threshold Audit (PASS - 105,000 bookings, 500 users, 60 spaces, 3,500 maintenance records, etc.)
-2. Academic Year Span & Semester Distribution (PASS - Sep 2023 to Mar 2026, 4 calendar years)
-3. Approved Booking Overlap Invariant (PASS - 0 prohibited overlaps)
-4. Out-of-Service Maintenance Overlap Audit (PASS - 0 active out-of-service overlaps)
-5. Advisory Acknowledgement Temporal Audit (PASS - 183,787 valid acks, 0 future invalid acks)
-6. Selectivity & Data Skew Audit (Top/Bottom Spaces, Weekdays, Hours)
-7. Enum Domain Coverage — USER & SPACE (PASS - 100% enum value coverage)
-8. Enum Domain Coverage — BOOKING & MAINTENANCERECORD (PASS - 100% enum value coverage)
-9. Data Integrity & Domain Rules (PASS - 0 rejection/capacity/approver violations)
-10. Usage Session Alignment & Orphan Audit (PASS - 61,950 sessions aligned, 0 orphans)
-11. Trigger Enablement Verification (PASS - All 9 triggers ENABLED)
+Present checks include total row counts, booking date range, status and path distributions, weekday and hour counts, populated-space counts, impact-level counts, acknowledgement count, booking interval order, capacity, approver role, approved overlaps, active out-of-service overlaps, usage-session alignment, and trigger enablement.
+
+The validator is missing or incomplete for the following required evidence:
+
+- Explicit null and orphan audits for major tables and Phase 2 tables.
+- Maintenance and usage-session time-order checks.
+- Duplicate-key and impact-history validity checks.
+- Academic-year counting using the project academic-year windows.
+- Facility and capacity coverage pass/fail checks.
+- Advisory acknowledgement eligibility, completeness, duplicate, and temporal checks.
+- Count of bookings linked to multiple advisories.
+- Advisory-to-out-of-service escalation-affected approved-booking analysis.
 
 ## 8. Step 15 Readiness Examination
 
 | Question | Answer |
 | --- | --- |
-| Does the package create at least 100,000 bookings? | Yes (105,000 rows created and verified live). |
-| Does it cover at least three academic years? | Yes (Sep 2023 – Mar 2026 verified live). |
-| Are required booking statuses represented? | Yes (all 7 status literals present). |
-| Are both approval paths represented? | Yes (`Instant` and `Staff` paths present). |
-| Are maintenance impact levels represented? | Yes (`advisory` and `out-of-service` present). |
-| Are advisory acknowledgements represented? | Yes (183,787 active advisories acknowledged). |
-| Are approved-booking conflicts absent? | Yes (0 prohibited overlaps verified by Check 3). |
-| Does room finding have meaningful capacity/facility variation? | Yes (6 space types, varied capacities, 12 facility types, 255 mappings). |
-| Do analytical queries return nontrivial results? | Yes (dataset validated and fully realistic). |
-| Are distributions suitable for index comparison? | Yes (intentional space volume skew implemented). |
-| Can the package be rerun safely? | Yes (`TRY...CATCH` and `IF OBJECT_ID` guards implemented). |
-| Does the validation script prove required properties? | Yes (11 automated PASS/FAIL checks included and passed). |
-| Are blocking issues unresolved? | None. All issues R14-1 through R14-5 resolved. |
+| Does the package create at least 100,000 bookings? | Yes, 105,000 observed. |
+| Does it cover at least three academic years? | Yes for the overall booking table. |
+| Are all required booking statuses represented? | Yes. |
+| Are both approval paths represented? | Yes, but the instant path is only 2.2%. |
+| Are both maintenance impact levels represented? | Yes. |
+| Are advisory acknowledgements correctly represented? | No. |
+| Are prohibited approved-booking conflicts absent? | Yes, zero observed. |
+| Does room finding have meaningful capacity and facility variation? | Yes. |
+| Do approved-booking reports have nontrivial results for every academic year? | No. |
+| Are distributions suitable for all required tuning work? | Partly; space skew is useful, but escalation and later approved-report data are not. |
+| Can the generator be rerun safely? | Yes in a dedicated benchmark database; the second run did not duplicate rows. |
+| Does the validator prove the required properties? | No. |
+| Would Step 15 need manual repair or hidden inserts? | Yes. |
+| Are blocking issues unresolved? | Yes. |
 
 ## 9. Scores
 
@@ -141,10 +157,14 @@ Both required files exist, are fully implemented, and pass live runtime validati
 
 ## 10. Required Revisions Before Step 15
 
-`No blocking revisions are required before Step 15.`
+1. Correct advisory acknowledgement generation to use only qualifying open advisory records and include every qualifying booking-maintenance pair.
+2. Add independent acknowledgement eligibility, completeness, duplicate, and temporal validation checks.
+3. Add intentional advisory-to-out-of-service escalation cases with affected approved bookings and validate their count.
+4. Spread approved bookings over every required academic year and reporting semester.
+5. Add the missing null, orphan, maintenance/usage temporal, academic-year, facility, and capacity validation evidence.
 
 ## 11. Final Readiness Verdict
 
-**READY FOR STEP 15**
+**NOT READY FOR STEP 15**
 
-The Step 14 Data Generator package (`01-generate-data.sql` and `02-validate-data.sql`) fully satisfies all Phase 2 requirements, schema invariants, data integrity constraints, performance distribution requirements, and rerun safety standards. It has been validated live on Microsoft SQL Server 2025 Developer Edition, producing 105,000 booking records across 3+ academic years with 0 invariant violations. It is ready to serve as the baseline dataset for Step 15 Index Tuning and Analytical Queries.
+The package meets scale, schema-compatibility, rerun, and approved-overlap requirements, but its acknowledgement data violates the approved active-advisory definition and its validator fails to detect that violation. Positive escalation cases and later-year approved reporting data are also required before meaningful Step 15 tuning can begin.
