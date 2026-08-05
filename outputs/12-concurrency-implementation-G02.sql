@@ -15,6 +15,21 @@
 
 USE University;
 GO
+/* =========================================================
+   Approval access-path enforcement
+   ========================================================= */
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.database_principals
+    WHERE name = 'AppServiceRole'
+      AND type = 'R'
+)
+BEGIN
+    CREATE ROLE AppServiceRole;
+END;
+GO
+
 
 /* =========================================================
    1. Implementation assumptions and object mapping
@@ -107,6 +122,7 @@ BEGIN
 
     DECLARE @SpaceCode VARCHAR(50);
     DECLARE @LockedSpaceCode VARCHAR(50);
+    DECLARE @CurrentSpaceStatus VARCHAR(30);  -- Added
     DECLARE @RequestedStart DATETIME;
     DECLARE @RequestedEnd DATETIME;
     DECLARE @BookingStatus VARCHAR(30);
@@ -115,14 +131,20 @@ BEGIN
     IF @BookingId IS NULL
         THROW 51002, 'BookingId is required.', 1;
 
-    /* This procedure owns its short transaction. Calling it from an outer
-       transaction could retain the per-space lock beyond this procedure. */
+    /*
+        This procedure owns its short transaction.
+        Calling it from an outer transaction could retain the per-space
+        lock beyond this procedure.
+    */
     IF @@TRANCOUNT <> 0
-        THROW 51021, 'sp_ApproveBooking cannot run inside a caller transaction.', 1;
+        THROW 51021,
+              'sp_ApproveBooking cannot run inside a caller transaction.',
+              1;
 
-    /* This non-locking lookup only identifies the per-space lock target.
-       The booking is reread after that lock is held; a changed pending
-       booking is rejected rather than approved against stale details. */
+    /*
+        This non-locking lookup identifies the per-space lock target.
+        The booking is reread after the space lock has been acquired.
+    */
     SELECT @SpaceCode = b.space_code
     FROM dbo.BOOKING AS b
     WHERE b.booking_id = @BookingId;
@@ -133,16 +155,35 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        /* Strict 2PL serialization point. Step 15 may tune the later
-           conflict lookup, but correctness does not depend on an index. */
-        SELECT @LockedSpaceCode = s.space_code
+        /*
+            Strict 2PL serialization point.
+
+            The procedure also reads current_status while holding the
+            per-space lock so that space availability cannot change
+            unnoticed during approval.
+        */
+        SELECT
+            @LockedSpaceCode = s.space_code,
+            @CurrentSpaceStatus = s.current_status
         FROM dbo.SPACE AS s WITH (UPDLOCK, HOLDLOCK)
         WHERE s.space_code = @SpaceCode;
 
         IF @LockedSpaceCode IS NULL
             THROW 51004, 'Space not found.', 1;
 
+        /*
+            Primary space-status validation.
+
+            The trigger remains as a secondary backstop, but the procedure
+            now rejects retired and temporarily closed spaces explicitly.
+        */
+        IF @CurrentSpaceStatus IN ('Retired', 'Temporarily Closed')
+            THROW 51014,
+                  'The space is retired or temporarily closed and cannot be booked.',
+                  1;
+
         SET @BookingStatus = NULL;
+
         SELECT
             @SpaceCode = b.space_code,
             @RequestedStart = b.requested_start,
@@ -156,7 +197,9 @@ BEGIN
             THROW 51003, 'Booking not found.', 1;
 
         IF @SpaceCode <> @LockedSpaceCode
-            THROW 51005, 'Booking space changed before approval; retry the approval.', 1;
+            THROW 51005,
+                  'Booking space changed before approval; retry the approval.',
+                  1;
 
         IF @BookingStatus <> 'Pending'
             THROW 51006, 'Booking is not eligible for approval.', 1;
@@ -167,7 +210,9 @@ BEGIN
         IF @ApprovalPath = 'Staff'
         BEGIN
             IF @ApproverId IS NULL
-                THROW 51008, 'A staff approval requires an approver.', 1;
+                THROW 51008,
+                      'A staff approval requires an approver.',
+                      1;
 
             IF NOT EXISTS
             (
@@ -175,17 +220,26 @@ BEGIN
                 FROM dbo.[USER] AS u
                 WHERE u.user_id = @ApproverId
                   AND u.account_status = 'Active'
-                  AND u.role IN ('Facility Staff', 'Facility Manager')
+                  AND u.role IN
+                      ('Facility Staff', 'Facility Manager')
             )
-                THROW 51009, 'Approver must be an active Facility Staff or Facility Manager user.', 1;
+                THROW 51009,
+                      'Approver must be an active Facility Staff or Facility Manager user.',
+                      1;
         END
         ELSE IF @ApprovalPath = 'Instant'
         BEGIN
             IF @ApproverId IS NOT NULL
-                THROW 51010, 'Instant approval must not specify an approver.', 1;
+                THROW 51010,
+                      'Instant approval must not specify an approver.',
+                      1;
         END
         ELSE
-            THROW 51011, 'Booking has an invalid approval path.', 1;
+        BEGIN
+            THROW 51011,
+                  'Booking has an invalid approval path.',
+                  1;
+        END;
 
         IF EXISTS
         (
@@ -197,23 +251,37 @@ BEGIN
               AND b.requested_start < @RequestedEnd
               AND b.requested_end > @RequestedStart
         )
-            THROW 51012, 'An overlapping approved booking exists for this space.', 1;
+            THROW 51012,
+                  'An overlapping approved booking exists for this space.',
+                  1;
 
         IF EXISTS
         (
             SELECT 1
             FROM dbo.MAINTENANCERECORD AS m
             WHERE m.space_code = @LockedSpaceCode
-              AND m.maintenance_status IN ('Reported', 'In Progress')
+              AND m.maintenance_status IN
+                  ('Reported', 'In Progress')
               AND m.impact_level = 'out-of-service'
               AND m.start_time < @RequestedEnd
-              AND ISNULL(m.completion_time, CONVERT(DATETIME, '9999-12-31', 120)) > @RequestedStart
+              AND ISNULL
+                  (
+                      m.completion_time,
+                      CONVERT(DATETIME, '9999-12-31', 120)
+                  ) > @RequestedStart
         )
-            THROW 51013, 'Overlapping active out-of-service maintenance exists for this space.', 1;
+            THROW 51013,
+                  'Overlapping active out-of-service maintenance exists for this space.',
+                  1;
 
         UPDATE dbo.BOOKING
         SET booking_status = 'Approved',
-            approver_id = CASE WHEN @ApprovalPath = 'Staff' THEN @ApproverId ELSE NULL END,
+            approver_id =
+                CASE
+                    WHEN @ApprovalPath = 'Staff'
+                        THEN @ApproverId
+                    ELSE NULL
+                END,
             decision_time = GETDATE(),
             decision_note = @DecisionNote,
             rejection_reason = NULL
@@ -224,6 +292,7 @@ BEGIN
     BEGIN CATCH
         IF XACT_STATE() <> 0
             ROLLBACK TRANSACTION;
+
         THROW;
     END CATCH;
 END;
@@ -351,7 +420,36 @@ GO
    or decision_note. Instant and staff approval paths both invoke
    dbo.sp_ApproveBooking; callers retry deadlock error 1205 outside the proc.
    ========================================================= */
+DENY UPDATE ON OBJECT::dbo.BOOKING
+(
+    booking_status,
+    approver_id,
+    decision_time,
+    decision_note,
+    approval_path
+)
+TO AppServiceRole;
+GO
 
+GRANT EXECUTE
+ON OBJECT::dbo.sp_ApproveBooking
+TO AppServiceRole;
+GO
+
+GRANT EXECUTE
+ON OBJECT::dbo.sp_EscalateMaintenanceImpact
+TO AppServiceRole;
+GO
+
+/*
+Deployment note:
+Add the actual application database user to AppServiceRole.
+
+Example:
+ALTER ROLE AppServiceRole ADD MEMBER AppServiceUser;
+
+The application user must not be a member of db_owner or db_datawriter.
+*/
 /* =========================================================
    5. Verification queries for object creation
    ========================================================= */
