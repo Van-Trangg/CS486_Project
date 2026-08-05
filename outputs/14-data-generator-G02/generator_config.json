@@ -1,0 +1,23 @@
+{
+  "booking_count": 105000,
+  "academic_year_count": 3,
+  "batch_size": 10000,
+  "random_seed": 48602,
+  "user_count": 600,
+  "space_count": 60,
+  "maintenance_count": 3500,
+  "facility_count": 12,
+  "status_ratios": {
+    "Completed": 0.55,
+    "Approved": 0.15,
+    "Rejected": 0.10,
+    "Cancelled": 0.08,
+    "No-Show": 0.05,
+    "Checked In": 0.04,
+    "Pending": 0.03
+  },
+  "instant_approval_ratio": 0.35,
+  "start_date": "2023-09-01",
+  "end_date": "2026-05-31",
+  "odbc_driver": "ODBC Driver 17 for SQL Server"
+}

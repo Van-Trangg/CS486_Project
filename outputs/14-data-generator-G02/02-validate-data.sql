@@ -1,439 +1,523 @@
--- ============================================================
--- Database: Campus Space Management System
--- Platform: Microsoft SQL Server
--- Group: G02
--- Step 14: Comprehensive Post-Generation Validation Script (Revised & Expanded)
--- File: 02-validate-data.sql
---
--- Features independent audit queries for:
---   - Row counts against required scale thresholds (R14-3)
---   - Academic year (AY2023-24, AY2024-25, AY2025-26) & semester distribution (R14-4)
---   - 100% Enum domain coverage
---   - Approved Booking Overlap Invariant (R14-1, R14-3)
---   - Out-of-service maintenance overlap audit (R14-1, R14-3)
---   - Advisory acknowledgement active open status, window, overlap & duplicate pair audit (R14-2, R14-3)
---   - Selectivity & data skew audit (R14-3, R14-5)
---   - Comprehensive FK orphan, null, PK duplicate & time-order audits across all 9 tables (R14-3)
---   - Capacity and facility combination coverage checks (R14-3)
---   - Trigger enablement verification
--- ============================================================
-
-USE University;
-GO
-
+/* Step 14 independent validation, Group G02. Select the database with -d. */
 SET NOCOUNT ON;
-GO
+SET XACT_ABORT ON;
 
-PRINT '============================================================';
-PRINT 'Step 14: Post-Generation Validation Report (Group G02)';
-PRINT '============================================================';
-PRINT '';
-GO
+IF LOWER(DB_NAME()) = 'university'
+    THROW 51400, 'Refusing to validate the protected University database in the Step 14 workflow.', 1;
 
--- ============================================================
--- Check 1: Row Count Audit
--- ============================================================
-PRINT '--- Check 1: Row Count Audit ---';
+IF OBJECT_ID('dbo.BOOKING', 'U') IS NULL
+    THROW 51401, 'The migrated Step 14 schema is not present in the selected database.', 1;
 
-SELECT
-    'ROW COUNT AUDIT' AS check_type,
-    t.name AS table_name,
-    p.rows AS actual_count,
-    CASE t.name
-        WHEN 'USER' THEN 400
-        WHEN 'SPACE' THEN 50
-        WHEN 'FACILITY' THEN 10
-        WHEN 'SPACE_FACILITY' THEN 200
-        WHEN 'MAINTENANCERECORD' THEN 3000
-        WHEN 'BOOKING' THEN 100000
-        WHEN 'USAGESESSION' THEN 50000
-        WHEN 'BOOKING_ADVISORY_ACK' THEN 5000
-        WHEN 'MAINTENANCE_IMPACT_HISTORY' THEN 500
-        ELSE 0
-    END AS required_minimum,
-    CASE
-        WHEN p.rows >= CASE t.name
-            WHEN 'USER' THEN 400 WHEN 'SPACE' THEN 50 WHEN 'FACILITY' THEN 10
-            WHEN 'SPACE_FACILITY' THEN 200 WHEN 'MAINTENANCERECORD' THEN 3000
-            WHEN 'BOOKING' THEN 100000 WHEN 'USAGESESSION' THEN 50000
-            WHEN 'BOOKING_ADVISORY_ACK' THEN 5000 WHEN 'MAINTENANCE_IMPACT_HISTORY' THEN 500
-            ELSE 0
-        END THEN 'PASS'
-        ELSE 'FAIL'
-    END AS result
-FROM sys.tables t
-JOIN sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)
-WHERE t.name IN ('USER', 'SPACE', 'FACILITY', 'SPACE_FACILITY',
-                 'MAINTENANCERECORD', 'BOOKING', 'USAGESESSION',
-                 'BOOKING_ADVISORY_ACK', 'MAINTENANCE_IMPACT_HISTORY')
-ORDER BY
-    CASE t.name
-        WHEN 'USER' THEN 1 WHEN 'SPACE' THEN 2 WHEN 'FACILITY' THEN 3
-        WHEN 'SPACE_FACILITY' THEN 4 WHEN 'MAINTENANCERECORD' THEN 5
-        WHEN 'BOOKING' THEN 6 WHEN 'USAGESESSION' THEN 7
-        WHEN 'BOOKING_ADVISORY_ACK' THEN 8 WHEN 'MAINTENANCE_IMPACT_HISTORY' THEN 9
-    END;
-GO
+CREATE TABLE #Checks
+(
+    check_name VARCHAR(120) NOT NULL,
+    actual_value BIGINT NOT NULL,
+    expected_condition VARCHAR(120) NOT NULL,
+    result VARCHAR(4) NOT NULL
+);
 
--- ============================================================
--- Check 2: Academic Year & Semester Coverage (R14-4 Fix)
--- ============================================================
-PRINT '';
-PRINT '--- Check 2: Academic Year & Semester Coverage ---';
-
--- 2a: Calendar Year Span
-SELECT
-    'ACADEMIC YEAR SPAN' AS check_type,
-    MIN(requested_start) AS earliest_booking,
-    MAX(requested_start) AS latest_booking,
-    COUNT(DISTINCT YEAR(requested_start)) AS calendar_years,
-    CASE WHEN COUNT(DISTINCT YEAR(requested_start)) >= 3 THEN 'PASS' ELSE 'FAIL' END AS result
-FROM dbo.BOOKING;
-
--- 2b: Academic Year Active Booking Distribution (AY 2023-24, 2024-25, 2025-26)
-SELECT
-    'AY ACTIVE BOOKINGS' AS check_type,
-    CASE
-        WHEN requested_start BETWEEN '2023-09-01' AND '2024-05-31' THEN 'AY 2023-2024'
-        WHEN requested_start BETWEEN '2024-09-01' AND '2025-05-31' THEN 'AY 2024-2025'
-        WHEN requested_start BETWEEN '2025-09-01' AND '2026-05-31' THEN 'AY 2025-2026'
-        ELSE 'Summer / Off-Grid'
-    END AS academic_year_period,
-    COUNT(*) AS total_bookings,
-    SUM(CASE WHEN booking_status IN ('Approved', 'Completed', 'Checked In') THEN 1 ELSE 0 END) AS active_approved_bookings,
-    CASE
-        WHEN SUM(CASE WHEN booking_status IN ('Approved', 'Completed', 'Checked In') THEN 1 ELSE 0 END) > 0 THEN 'PASS'
-        ELSE 'FAIL'
-    END AS result
-FROM dbo.BOOKING
-GROUP BY
-    CASE
-        WHEN requested_start BETWEEN '2023-09-01' AND '2024-05-31' THEN 'AY 2023-2024'
-        WHEN requested_start BETWEEN '2024-09-01' AND '2025-05-31' THEN 'AY 2024-2025'
-        WHEN requested_start BETWEEN '2025-09-01' AND '2026-05-31' THEN 'AY 2025-2026'
-        ELSE 'Summer / Off-Grid'
-    END
-ORDER BY academic_year_period;
-
--- 2c: Semester Breakdown
-SELECT
-    'SEMESTER DISTRIBUTION' AS check_type,
-    CASE
-        WHEN MONTH(requested_start) BETWEEN 9 AND 12 THEN 'Fall (Sep-Dec)'
-        WHEN MONTH(requested_start) BETWEEN 1 AND 5 THEN 'Spring (Jan-May)'
-        ELSE 'Summer (Jun-Aug)'
-    END AS semester,
-    YEAR(requested_start) AS calendar_year,
-    COUNT(*) AS booking_count
-FROM dbo.BOOKING
-GROUP BY
-    CASE
-        WHEN MONTH(requested_start) BETWEEN 9 AND 12 THEN 'Fall (Sep-Dec)'
-        WHEN MONTH(requested_start) BETWEEN 1 AND 5 THEN 'Spring (Jan-May)'
-        ELSE 'Summer (Jun-Aug)'
-    END,
-    YEAR(requested_start)
-ORDER BY calendar_year, semester;
-GO
-
--- ============================================================
--- Check 3: APPROVED BOOKING OVERLAP INVARIANT (R14-1, R14-3)
--- ============================================================
-PRINT '';
-PRINT '--- Check 3: Approved Booking Overlap Invariant ---';
-
-SELECT
-    'APPROVED OVERLAP INVARIANT' AS check_type,
-    COUNT(*) AS prohibited_overlapping_pairs,
-    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL (Overlapping approved bookings detected!)' END AS result
-FROM dbo.BOOKING b1
-JOIN dbo.BOOKING b2
-    ON b1.space_code = b2.space_code
-    AND b1.booking_id < b2.booking_id
-    AND b1.booking_status IN ('Approved', 'Checked In', 'Completed')
-    AND b2.booking_status IN ('Approved', 'Checked In', 'Completed')
-    -- Half-open overlap predicate
-    AND b1.requested_start < b2.requested_end
-    AND b1.requested_end > b2.requested_start;
-GO
-
--- ============================================================
--- Check 4: Out-of-Service Maintenance Overlap Audit (R14-1, R14-3)
--- ============================================================
-PRINT '';
-PRINT '--- Check 4: Out-of-Service Maintenance Overlap Audit ---';
-
-SELECT
-    'OUT-OF-SERVICE OVERLAP AUDIT' AS check_type,
-    COUNT(*) AS active_out_of_service_overlaps,
-    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result
-FROM dbo.BOOKING b
-JOIN dbo.MAINTENANCERECORD m
-    ON b.space_code = m.space_code
-    AND m.impact_level = 'out-of-service'
-    AND m.maintenance_status IN ('Reported', 'In Progress')
-    AND b.booking_status IN ('Approved', 'Checked In', 'Completed')
-    AND b.requested_start < ISNULL(m.completion_time, '9999-12-31')
-    AND b.requested_end > m.start_time;
-GO
-
--- ============================================================
--- Check 5: Advisory Acknowledgement Comprehensive Audit (R14-2, R14-3)
--- ============================================================
-PRINT '';
-PRINT '--- Check 5: Advisory Acknowledgement Comprehensive Audit ---';
-
--- 5a: Verify all acknowledged maintenance records have advisory impact level
-SELECT
-    'ACK IMPACT LEVEL AUDIT' AS check_type,
-    COUNT(*) AS total_acks,
-    SUM(CASE WHEN m.impact_level = 'advisory' THEN 1 ELSE 0 END) AS advisory_acks,
-    SUM(CASE WHEN m.impact_level <> 'advisory' THEN 1 ELSE 0 END) AS non_advisory_acks,
-    CASE WHEN SUM(CASE WHEN m.impact_level <> 'advisory' THEN 1 ELSE 0 END) = 0
-        THEN 'PASS' ELSE 'FAIL' END AS result
-FROM dbo.BOOKING_ADVISORY_ACK ack
-JOIN dbo.MAINTENANCERECORD m ON ack.maintenance_id = m.maintenance_id;
-
--- 5b: Verify acknowledged maintenance records are OPEN (Reported, In Progress) — R14-2 Fix
-SELECT
-    'ACK OPEN STATUS AUDIT' AS check_type,
-    COUNT(*) AS total_acks,
-    SUM(CASE WHEN m.maintenance_status IN ('Reported', 'In Progress') THEN 1 ELSE 0 END) AS open_advisory_acks,
-    SUM(CASE WHEN m.maintenance_status NOT IN ('Reported', 'In Progress') THEN 1 ELSE 0 END) AS invalid_resolved_acks,
-    CASE WHEN SUM(CASE WHEN m.maintenance_status NOT IN ('Reported', 'In Progress') THEN 1 ELSE 0 END) = 0
-        THEN 'PASS' ELSE 'FAIL' END AS result
-FROM dbo.BOOKING_ADVISORY_ACK ack
-JOIN dbo.MAINTENANCERECORD m ON ack.maintenance_id = m.maintenance_id;
-
--- 5c: Verify advisory was temporally active at acknowledgement time
-SELECT
-    'ACK TEMPORAL WINDOW AUDIT' AS check_type,
-    COUNT(*) AS total_acks,
-    SUM(CASE WHEN m.start_time <= ack.acknowledged_at
-              AND ISNULL(m.completion_time, '9999-12-31') > ack.acknowledged_at THEN 1 ELSE 0 END) AS valid_within_period,
-    SUM(CASE WHEN m.start_time > ack.acknowledged_at THEN 1 ELSE 0 END) AS invalid_future,
-    SUM(CASE WHEN ISNULL(m.completion_time, '9999-12-31') <= ack.acknowledged_at THEN 1 ELSE 0 END) AS invalid_expired,
-    CASE
-        WHEN SUM(CASE WHEN m.start_time > ack.acknowledged_at THEN 1 ELSE 0 END) = 0
-         AND SUM(CASE WHEN ISNULL(m.completion_time, '9999-12-31') <= ack.acknowledged_at THEN 1 ELSE 0 END) = 0
-        THEN 'PASS' ELSE 'FAIL'
-    END AS result
-FROM dbo.BOOKING_ADVISORY_ACK ack
-JOIN dbo.MAINTENANCERECORD m ON ack.maintenance_id = m.maintenance_id;
-
--- 5d: Verify booking period overlaps advisory maintenance period
-SELECT
-    'ACK PERIOD OVERLAP AUDIT' AS check_type,
-    COUNT(*) AS total_acks,
-    SUM(CASE WHEN b.requested_start < ISNULL(m.completion_time, '9999-12-31')
-              AND b.requested_end > m.start_time THEN 1 ELSE 0 END) AS valid_overlapping,
-    SUM(CASE WHEN NOT (b.requested_start < ISNULL(m.completion_time, '9999-12-31')
-              AND b.requested_end > m.start_time) THEN 1 ELSE 0 END) AS non_overlapping,
-    CASE WHEN SUM(CASE WHEN NOT (b.requested_start < ISNULL(m.completion_time, '9999-12-31')
-              AND b.requested_end > m.start_time) THEN 1 ELSE 0 END) = 0
-        THEN 'PASS' ELSE 'FAIL'
-    END AS result
-FROM dbo.BOOKING_ADVISORY_ACK ack
-JOIN dbo.BOOKING b ON ack.booking_id = b.booking_id
-JOIN dbo.MAINTENANCERECORD m ON ack.maintenance_id = m.maintenance_id;
-
--- 5e: Duplicate pair audit in BOOKING_ADVISORY_ACK
-SELECT
-    'ACK DUPLICATE PAIR AUDIT' AS check_type,
-    COUNT(*) - COUNT(DISTINCT CAST(booking_id AS VARCHAR) + '_' + CAST(maintenance_id AS VARCHAR)) AS duplicate_pairs,
-    CASE WHEN COUNT(*) = COUNT(DISTINCT CAST(booking_id AS VARCHAR) + '_' + CAST(maintenance_id AS VARCHAR))
-        THEN 'PASS' ELSE 'FAIL' END AS result
-FROM dbo.BOOKING_ADVISORY_ACK;
-GO
-
--- ============================================================
--- Check 6: Selectivity & Data Skew Audit (R14-3, R14-5)
--- ============================================================
-PRINT '';
-PRINT '--- Check 6: Selectivity & Data Skew Audit ---';
-
--- Top 5 Popular Spaces
-SELECT TOP 5
-    'TOP SPACES (HIGH VOLUME)' AS check_type,
-    b.space_code,
-    s.space_type,
-    COUNT(*) AS booking_count
-FROM dbo.BOOKING b
-JOIN dbo.SPACE s ON b.space_code = s.space_code
-GROUP BY b.space_code, s.space_type
-ORDER BY booking_count DESC;
-
--- Bottom 5 Less Popular Spaces
-SELECT TOP 5
-    'BOTTOM SPACES (LOW VOLUME)' AS check_type,
-    b.space_code,
-    s.space_type,
-    COUNT(*) AS booking_count
-FROM dbo.BOOKING b
-JOIN dbo.SPACE s ON b.space_code = s.space_code
-GROUP BY b.space_code, s.space_type
-ORDER BY booking_count ASC;
-
--- Weekday Distribution
-SELECT
-    'WEEKDAY DISTRIBUTION' AS check_type,
-    DATENAME(WEEKDAY, requested_start) AS day_of_week,
-    COUNT(*) AS booking_count
-FROM dbo.BOOKING
-GROUP BY DATENAME(WEEKDAY, requested_start), DATEPART(WEEKDAY, requested_start)
-ORDER BY DATEPART(WEEKDAY, requested_start);
-
--- Hour Distribution
-SELECT
-    'HOUR DISTRIBUTION' AS check_type,
-    DATEPART(HOUR, requested_start) AS start_hour,
-    COUNT(*) AS booking_count
-FROM dbo.BOOKING
-GROUP BY DATEPART(HOUR, requested_start)
-ORDER BY start_hour;
-GO
-
--- ============================================================
--- Check 7: Enum Coverage — USER & SPACE
--- ============================================================
-PRINT '';
-PRINT '--- Check 7: Enum Coverage ---';
-
-SELECT 'USER.role' AS check_type, role AS enum_value, COUNT(*) AS count FROM dbo.[USER] GROUP BY role ORDER BY role;
-SELECT 'USER.account_status' AS check_type, account_status AS enum_value, COUNT(*) AS count FROM dbo.[USER] GROUP BY account_status ORDER BY account_status;
-SELECT 'SPACE.space_type' AS check_type, space_type AS enum_value, COUNT(*) AS count FROM dbo.SPACE GROUP BY space_type ORDER BY space_type;
-SELECT 'SPACE.current_status' AS check_type, current_status AS enum_value, COUNT(*) AS count FROM dbo.SPACE GROUP BY current_status ORDER BY current_status;
-SELECT 'SPACE_FACILITY.operation_status' AS check_type, operation_status AS enum_value, COUNT(*) AS count FROM dbo.SPACE_FACILITY GROUP BY operation_status ORDER BY operation_status;
-GO
-
--- ============================================================
--- Check 8: Enum Coverage — BOOKING & MAINTENANCERECORD
--- ============================================================
-EXEC('SELECT ''BOOKING.booking_status'' AS check_type, booking_status AS enum_value, COUNT(*) AS count FROM dbo.BOOKING GROUP BY booking_status ORDER BY booking_status;');
-EXEC('SELECT ''BOOKING.purpose'' AS check_type, purpose AS enum_value, COUNT(*) AS count FROM dbo.BOOKING GROUP BY purpose ORDER BY purpose;');
-EXEC('SELECT ''BOOKING.approval_path'' AS check_type, approval_path AS enum_value, COUNT(*) AS count FROM dbo.BOOKING GROUP BY approval_path ORDER BY approval_path;');
-EXEC('SELECT ''MAINTENANCERECORD.maintenance_status'' AS check_type, maintenance_status AS enum_value, COUNT(*) AS count FROM dbo.MAINTENANCERECORD GROUP BY maintenance_status ORDER BY maintenance_status;');
-EXEC('SELECT ''MAINTENANCERECORD.problem_type'' AS check_type, problem_type AS enum_value, COUNT(*) AS count FROM dbo.MAINTENANCERECORD GROUP BY problem_type ORDER BY problem_type;');
-EXEC('SELECT ''MAINTENANCERECORD.impact_level'' AS check_type, impact_level AS enum_value, COUNT(*) AS count FROM dbo.MAINTENANCERECORD GROUP BY impact_level ORDER BY impact_level;');
-GO
-
--- ============================================================
--- Check 9: Comprehensive Data Integrity, FK Orphan & Time-Order Audits (R14-3)
--- ============================================================
-PRINT '';
-PRINT '--- Check 9: Data Integrity & Orphan Audits ---';
-
--- 9a: Foreign Key Orphan Checks (All 9 Tables)
-SELECT 'ORPHAN SPACE_FACILITY -> SPACE' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.SPACE_FACILITY sf LEFT JOIN dbo.SPACE s ON sf.space_code = s.space_code WHERE s.space_code IS NULL;
-SELECT 'ORPHAN SPACE_FACILITY -> FACILITY' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.SPACE_FACILITY sf LEFT JOIN dbo.FACILITY f ON sf.facility_id = f.facility_id WHERE f.facility_id IS NULL;
-SELECT 'ORPHAN MAINTENANCERECORD -> SPACE' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.MAINTENANCERECORD m LEFT JOIN dbo.SPACE s ON m.space_code = s.space_code WHERE s.space_code IS NULL;
-SELECT 'ORPHAN MAINTENANCERECORD -> USER (reporter)' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.MAINTENANCERECORD m LEFT JOIN dbo.[USER] u ON m.reporter_id = u.user_id WHERE u.user_id IS NULL;
-SELECT 'ORPHAN MAINTENANCERECORD -> USER (staff)' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.MAINTENANCERECORD m LEFT JOIN dbo.[USER] u ON m.assigned_staff_id = u.user_id WHERE m.assigned_staff_id IS NOT NULL AND u.user_id IS NULL;
-SELECT 'ORPHAN BOOKING -> SPACE' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING b LEFT JOIN dbo.SPACE s ON b.space_code = s.space_code WHERE s.space_code IS NULL;
-SELECT 'ORPHAN BOOKING -> USER (requester)' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING b LEFT JOIN dbo.[USER] u ON b.requester_id = u.user_id WHERE u.user_id IS NULL;
-SELECT 'ORPHAN BOOKING -> USER (approver)' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING b LEFT JOIN dbo.[USER] u ON b.approver_id = u.user_id WHERE b.approver_id IS NOT NULL AND u.user_id IS NULL;
-SELECT 'ORPHAN USAGESESSION -> BOOKING' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.USAGESESSION us LEFT JOIN dbo.BOOKING b ON us.booking_id = b.booking_id WHERE b.booking_id IS NULL;
-SELECT 'ORPHAN ACK -> BOOKING' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING_ADVISORY_ACK ack LEFT JOIN dbo.BOOKING b ON ack.booking_id = b.booking_id WHERE b.booking_id IS NULL;
-SELECT 'ORPHAN ACK -> MAINTENANCERECORD' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING_ADVISORY_ACK ack LEFT JOIN dbo.MAINTENANCERECORD m ON ack.maintenance_id = m.maintenance_id WHERE m.maintenance_id IS NULL;
-SELECT 'ORPHAN HIST -> MAINTENANCERECORD' AS check_type, COUNT(*) AS orphan_count, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.MAINTENANCE_IMPACT_HISTORY h LEFT JOIN dbo.MAINTENANCERECORD m ON h.maintenance_id = m.maintenance_id WHERE m.maintenance_id IS NULL;
-
--- 9b: Business Rule & Constraint Integrity
-SELECT 'REJECTION REASON' AS check_type, COUNT(*) AS rejected_without_reason, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING WHERE booking_status = 'Rejected' AND rejection_reason IS NULL;
-SELECT 'BOOKING TIME ORDER' AS check_type, COUNT(*) AS invalid_time_order, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING WHERE requested_end <= requested_start;
-SELECT 'MAINTENANCE TIME ORDER' AS check_type, COUNT(*) AS invalid_time_order, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.MAINTENANCERECORD WHERE completion_time IS NOT NULL AND completion_time <= start_time;
-SELECT 'SESSION TIME ORDER' AS check_type, COUNT(*) AS invalid_time_order, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.USAGESESSION WHERE actual_end IS NOT NULL AND actual_end <= actual_start;
-EXEC('SELECT ''CAPACITY CONSTRAINT'' AS check_type, COUNT(*) AS over_capacity, CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END AS result FROM dbo.BOOKING b JOIN dbo.SPACE s ON b.space_code = s.space_code WHERE b.expected_participants > s.capacity;');
-EXEC('SELECT ''APPROVER ROLE'' AS check_type, COUNT(*) AS invalid_approvers, CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END AS result FROM dbo.BOOKING b JOIN dbo.[USER] u ON b.approver_id = u.user_id WHERE u.role NOT IN (''Facility Staff'', ''Facility Manager'');');
-EXEC('SELECT ''INSTANT PATH CONSISTENCY'' AS check_type, COUNT(*) AS instant_with_approver, CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END AS result FROM dbo.BOOKING WHERE approval_path = ''Instant'' AND approver_id IS NOT NULL;');
-SELECT 'CREATED_AT ORDER' AS check_type, COUNT(*) AS invalid_created_at, CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result FROM dbo.BOOKING WHERE created_at > requested_start;
-GO
-
--- ============================================================
--- Check 10: Space Capacity & Facility Coverage Audit (R14-3)
--- ============================================================
-PRINT '';
-PRINT '--- Check 10: Space Capacity & Facility Coverage Audit ---';
-
-SELECT
-    'SPACE TYPE CAPACITY RANGE' AS check_type,
-    space_type,
-    COUNT(*) AS space_count,
-    MIN(capacity) AS min_capacity,
-    MAX(capacity) AS max_capacity,
-    AVG(capacity) AS avg_capacity
-FROM dbo.SPACE
-GROUP BY space_type
-ORDER BY space_type;
-
-SELECT
-    'SPACE TYPE FACILITY COVERAGE' AS check_type,
-    s.space_type,
-    COUNT(DISTINCT sf.facility_id) AS distinct_facilities_assigned,
-    COUNT(*) AS total_facility_mappings
-FROM dbo.SPACE s
-JOIN dbo.SPACE_FACILITY sf ON s.space_code = sf.space_code
-GROUP BY s.space_type
-ORDER BY s.space_type;
-GO
-
--- ============================================================
--- Check 11: Trigger Status Verification
--- ============================================================
-PRINT '';
-PRINT '--- Check 11: Trigger Status ---';
-
-SELECT
-    'TRIGGER STATUS' AS check_type,
-    t.name AS trigger_name,
-    OBJECT_NAME(t.parent_id) AS parent_table,
-    CASE WHEN t.is_disabled = 0 THEN 'ENABLED' ELSE 'DISABLED' END AS status,
-    CASE WHEN t.is_disabled = 0 THEN 'PASS' ELSE 'FAIL' END AS result
-FROM sys.triggers t
-WHERE t.parent_id IN (
-    OBJECT_ID('dbo.BOOKING'),
-    OBJECT_ID('dbo.MAINTENANCERECORD'),
-    OBJECT_ID('dbo.USAGESESSION')
+DECLARE @BookingCount BIGINT = (SELECT COUNT_BIG(*) FROM dbo.BOOKING);
+DECLARE @AcademicYears BIGINT;
+WITH AcademicYears AS
+(
+    SELECT DISTINCT CASE WHEN MONTH(requested_start) >= 9 THEN YEAR(requested_start) ELSE YEAR(requested_start) - 1 END AS academic_year_start
+    FROM dbo.BOOKING
 )
-ORDER BY OBJECT_NAME(t.parent_id), t.name;
-GO
+SELECT @AcademicYears = COUNT_BIG(*) FROM AcademicYears;
 
--- ============================================================
--- Check 12: Escalation-Affected Booking & Approved Date Span Audit
--- ============================================================
-PRINT '';
-PRINT '--- Check 12: Escalation-Affected Booking & Approved Date Span ---';
+INSERT #Checks VALUES
+('Booking row minimum', @BookingCount, '>= 100000', IIF(@BookingCount >= 100000, 'PASS', 'FAIL')),
+('Distinct academic years', @AcademicYears, '>= 3', IIF(@AcademicYears >= 3, 'PASS', 'FAIL')),
+('User row minimum', (SELECT COUNT_BIG(*) FROM dbo.[USER]), '>= 400', IIF((SELECT COUNT_BIG(*) FROM dbo.[USER]) >= 400, 'PASS', 'FAIL')),
+('Space row minimum', (SELECT COUNT_BIG(*) FROM dbo.SPACE), '>= 50', IIF((SELECT COUNT_BIG(*) FROM dbo.SPACE) >= 50, 'PASS', 'FAIL')),
+('Facility row minimum', (SELECT COUNT_BIG(*) FROM dbo.FACILITY), '>= 10', IIF((SELECT COUNT_BIG(*) FROM dbo.FACILITY) >= 10, 'PASS', 'FAIL')),
+('Space-facility row minimum', (SELECT COUNT_BIG(*) FROM dbo.SPACE_FACILITY), '>= 200', IIF((SELECT COUNT_BIG(*) FROM dbo.SPACE_FACILITY) >= 200, 'PASS', 'FAIL')),
+('Maintenance row minimum', (SELECT COUNT_BIG(*) FROM dbo.MAINTENANCERECORD), '>= 3000', IIF((SELECT COUNT_BIG(*) FROM dbo.MAINTENANCERECORD) >= 3000, 'PASS', 'FAIL')),
+('Usage-session row minimum', (SELECT COUNT_BIG(*) FROM dbo.USAGESESSION), '>= 50000', IIF((SELECT COUNT_BIG(*) FROM dbo.USAGESESSION) >= 50000, 'PASS', 'FAIL')),
+('Advisory acknowledgement minimum', (SELECT COUNT_BIG(*) FROM dbo.BOOKING_ADVISORY_ACK), '>= 5000', IIF((SELECT COUNT_BIG(*) FROM dbo.BOOKING_ADVISORY_ACK) >= 5000, 'PASS', 'FAIL')),
+('Impact-history row minimum', (SELECT COUNT_BIG(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY), '>= 500', IIF((SELECT COUNT_BIG(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY) >= 500, 'PASS', 'FAIL'));
 
--- 12a: Verify escalation-affected approved bookings exist
+DECLARE @StatusCoverage BIGINT = (SELECT COUNT_BIG(DISTINCT booking_status) FROM dbo.BOOKING);
+DECLARE @PurposeCoverage BIGINT = (SELECT COUNT_BIG(DISTINCT purpose) FROM dbo.BOOKING);
+DECLARE @PathCoverage BIGINT = (SELECT COUNT_BIG(DISTINCT approval_path) FROM dbo.BOOKING);
+DECLARE @ImpactCoverage BIGINT = (SELECT COUNT_BIG(DISTINCT impact_level) FROM dbo.MAINTENANCERECORD);
+INSERT #Checks VALUES
+('Booking status domain coverage', @StatusCoverage, '= 7', IIF(@StatusCoverage = 7, 'PASS', 'FAIL')),
+('Booking purpose domain coverage', @PurposeCoverage, '= 7', IIF(@PurposeCoverage = 7, 'PASS', 'FAIL')),
+('Approval path domain coverage', @PathCoverage, '= 2', IIF(@PathCoverage = 2, 'PASS', 'FAIL')),
+('Maintenance impact coverage', @ImpactCoverage, '= 2', IIF(@ImpactCoverage = 2, 'PASS', 'FAIL')),
+('User role domain coverage', (SELECT COUNT_BIG(DISTINCT role) FROM dbo.[USER]), '= 6', IIF((SELECT COUNT_BIG(DISTINCT role) FROM dbo.[USER]) = 6, 'PASS', 'FAIL')),
+('User account-status coverage', (SELECT COUNT_BIG(DISTINCT account_status) FROM dbo.[USER]), '= 3', IIF((SELECT COUNT_BIG(DISTINCT account_status) FROM dbo.[USER]) = 3, 'PASS', 'FAIL')),
+('Space type domain coverage', (SELECT COUNT_BIG(DISTINCT space_type) FROM dbo.SPACE), '= 6', IIF((SELECT COUNT_BIG(DISTINCT space_type) FROM dbo.SPACE) = 6, 'PASS', 'FAIL')),
+('Space status domain coverage', (SELECT COUNT_BIG(DISTINCT current_status) FROM dbo.SPACE), '= 5', IIF((SELECT COUNT_BIG(DISTINCT current_status) FROM dbo.SPACE) = 5, 'PASS', 'FAIL')),
+('Facility operation-status coverage', (SELECT COUNT_BIG(DISTINCT operation_status) FROM dbo.SPACE_FACILITY), '= 3', IIF((SELECT COUNT_BIG(DISTINCT operation_status) FROM dbo.SPACE_FACILITY) = 3, 'PASS', 'FAIL')),
+('Maintenance status coverage', (SELECT COUNT_BIG(DISTINCT maintenance_status) FROM dbo.MAINTENANCERECORD), '= 4', IIF((SELECT COUNT_BIG(DISTINCT maintenance_status) FROM dbo.MAINTENANCERECORD) = 4, 'PASS', 'FAIL')),
+('Maintenance problem-type coverage', (SELECT COUNT_BIG(DISTINCT problem_type) FROM dbo.MAINTENANCERECORD), '= 6', IIF((SELECT COUNT_BIG(DISTINCT problem_type) FROM dbo.MAINTENANCERECORD) = 6, 'PASS', 'FAIL'));
+
+DECLARE @InvalidBookingTime BIGINT = (SELECT COUNT_BIG(*) FROM dbo.BOOKING WHERE requested_end <= requested_start OR created_at > requested_start);
+DECLARE @InvalidCapacity BIGINT = (SELECT COUNT_BIG(*) FROM dbo.BOOKING b JOIN dbo.SPACE s ON s.space_code=b.space_code WHERE b.expected_participants <= 0 OR b.expected_participants > s.capacity);
+DECLARE @InvalidDecision BIGINT = (SELECT COUNT_BIG(*) FROM dbo.BOOKING WHERE decision_time < created_at OR decision_time > requested_start);
+DECLARE @InvalidStatusFields BIGINT =
+(
+    SELECT COUNT_BIG(*) FROM dbo.BOOKING
+    WHERE (booking_status='Rejected' AND rejection_reason IS NULL)
+       OR (booking_status='Pending' AND (approver_id IS NOT NULL OR decision_time IS NOT NULL))
+       OR (approval_path='Instant' AND approver_id IS NOT NULL)
+       OR (booking_status IN ('Approved','Checked In','Completed','No-Show','Rejected') AND decision_time IS NULL)
+);
+INSERT #Checks VALUES
+('Invalid booking time order', @InvalidBookingTime, '= 0', IIF(@InvalidBookingTime=0, 'PASS', 'FAIL')),
+('Invalid booking capacity', @InvalidCapacity, '= 0', IIF(@InvalidCapacity=0, 'PASS', 'FAIL')),
+('Invalid decision chronology', @InvalidDecision, '= 0', IIF(@InvalidDecision=0, 'PASS', 'FAIL')),
+('Invalid status/path field combinations', @InvalidStatusFields, '= 0', IIF(@InvalidStatusFields=0, 'PASS', 'FAIL'));
+
+DECLARE @ApprovedConflicts BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.BOOKING b1
+    JOIN dbo.BOOKING b2 ON b2.space_code=b1.space_code AND b2.booking_id>b1.booking_id
+    WHERE b1.booking_status IN ('Approved','Checked In','Completed','No-Show')
+      AND b2.booking_status IN ('Approved','Checked In','Completed','No-Show')
+      AND b1.requested_start < b2.requested_end
+      AND b1.requested_end > b2.requested_start
+);
+INSERT #Checks VALUES ('Approved-lifecycle overlap pairs', @ApprovedConflicts, '= 0', IIF(@ApprovedConflicts=0, 'PASS', 'FAIL'));
+
+DECLARE @MissingUsage BIGINT =
+(
+    SELECT COUNT_BIG(*) FROM dbo.BOOKING b
+    LEFT JOIN dbo.USAGESESSION u ON u.booking_id=b.booking_id
+    WHERE b.booking_status IN ('Completed','Checked In') AND u.booking_id IS NULL
+);
+DECLARE @ExtraUsage BIGINT =
+(
+    SELECT COUNT_BIG(*) FROM dbo.USAGESESSION u JOIN dbo.BOOKING b ON b.booking_id=u.booking_id
+    WHERE b.booking_status NOT IN ('Completed','Checked In')
+);
+DECLARE @InvalidUsageTime BIGINT = (SELECT COUNT_BIG(*) FROM dbo.USAGESESSION WHERE actual_end IS NOT NULL AND actual_end <= actual_start);
+INSERT #Checks VALUES
+('Missing required usage sessions', @MissingUsage, '= 0', IIF(@MissingUsage=0, 'PASS', 'FAIL')),
+('Usage sessions on unsupported statuses', @ExtraUsage, '= 0', IIF(@ExtraUsage=0, 'PASS', 'FAIL')),
+('Invalid usage-session time order', @InvalidUsageTime, '= 0', IIF(@InvalidUsageTime=0, 'PASS', 'FAIL'));
+
+/* ============================================================
+   INVALID ADVISORY ACKNOWLEDGEMENT VALIDATION
+   ============================================================ */
+
+DECLARE @InvalidAck BIGINT = 0;
+
+;WITH OrderedHistory AS
+(
+    SELECT
+        h.maintenance_id,
+        h.changed_at,
+        h.old_impact_level,
+
+        LAG(h.changed_at) OVER
+        (
+            PARTITION BY h.maintenance_id
+            ORDER BY h.changed_at
+        ) AS previous_changed_at,
+
+        ROW_NUMBER() OVER
+        (
+            PARTITION BY h.maintenance_id
+            ORDER BY h.changed_at DESC
+        ) AS reverse_sequence
+    FROM dbo.MAINTENANCE_IMPACT_HISTORY AS h
+),
+ImpactPeriods AS
+(
+    /*
+        Period before each change.
+
+        Example:
+        08:00 Advisory -> 10:00 Out-of-Service
+
+        For the history row at 10:00:
+        valid_from  = previous change time
+        valid_to    = 10:00
+        impact      = old_impact_level
+    */
+    SELECT
+        oh.maintenance_id,
+        oh.previous_changed_at AS valid_from,
+        oh.changed_at AS valid_to,
+        oh.old_impact_level AS impact_level
+    FROM OrderedHistory AS oh
+
+    UNION ALL
+
+    /*
+        Period after the latest history change.
+        The current impact level is stored in MAINTENANCERECORD.
+    */
+    SELECT
+        oh.maintenance_id,
+        oh.changed_at AS valid_from,
+        NULL AS valid_to,
+        m.impact_level
+    FROM OrderedHistory AS oh
+    JOIN dbo.MAINTENANCERECORD AS m
+        ON m.maintenance_id = oh.maintenance_id
+    WHERE oh.reverse_sequence = 1
+),
+AcknowledgementState AS
+(
+    SELECT
+        a.booking_id,
+        a.maintenance_id,
+        a.acknowledged_at,
+
+        b.created_at,
+        b.requested_start,
+        b.requested_end,
+        b.space_code AS booking_space_code,
+
+        m.space_code AS maintenance_space_code,
+        m.start_time,
+        m.completion_time,
+
+        /*
+            When maintenance has no history rows, use its current impact level.
+        */
+        COALESCE(p.impact_level, m.impact_level) AS impact_at_ack
+    FROM dbo.BOOKING_ADVISORY_ACK AS a
+    JOIN dbo.BOOKING AS b
+        ON b.booking_id = a.booking_id
+    JOIN dbo.MAINTENANCERECORD AS m
+        ON m.maintenance_id = a.maintenance_id
+    LEFT JOIN ImpactPeriods AS p
+        ON p.maintenance_id = a.maintenance_id
+       AND
+       (
+           p.valid_from IS NULL
+           OR a.acknowledged_at >= p.valid_from
+       )
+       AND
+       (
+           p.valid_to IS NULL
+           OR a.acknowledged_at < p.valid_to
+       )
+)
 SELECT
-    'ESCALATION-AFFECTED BOOKINGS' AS check_type,
-    COUNT(DISTINCT b.booking_id) AS affected_approved_bookings,
-    COUNT(DISTINCT m.maintenance_id) AS escalated_maintenance_records,
-    CASE WHEN COUNT(DISTINCT b.booking_id) > 0 THEN 'PASS'
-         ELSE 'FAIL (No escalation-affected bookings found)' END AS result
-FROM dbo.BOOKING b
-JOIN dbo.MAINTENANCERECORD m
-    ON b.space_code = m.space_code
-    AND m.impact_level = 'out-of-service'
-    AND b.booking_status = 'Approved'
-    AND b.requested_start < ISNULL(m.completion_time, '9999-12-31')
-    AND b.requested_end > m.start_time
-JOIN dbo.MAINTENANCE_IMPACT_HISTORY h
-    ON h.maintenance_id = m.maintenance_id
-    AND h.old_impact_level = 'advisory'
-    AND h.new_impact_level = 'out-of-service';
+    @InvalidAck = COUNT_BIG(*)
+FROM AcknowledgementState AS x
+WHERE x.impact_at_ack <> 'advisory'
 
--- 12b: Verify Approved bookings span at least 3 calendar years
-SELECT
-    'APPROVED BOOKING DATE SPAN' AS check_type,
-    MIN(requested_start) AS earliest_approved,
-    MAX(requested_start) AS latest_approved,
-    COUNT(DISTINCT YEAR(requested_start)) AS calendar_years_with_approved,
-    CASE WHEN COUNT(DISTINCT YEAR(requested_start)) >= 3 THEN 'PASS' ELSE 'FAIL' END AS result
-FROM dbo.BOOKING
-WHERE booking_status = 'Approved';
-GO
+   OR x.maintenance_space_code <> x.booking_space_code
 
-PRINT '============================================================';
-PRINT 'Step 14: Validation Complete';
-PRINT '============================================================';
-GO
+   OR x.start_time >= x.requested_end
+
+   OR ISNULL
+      (
+          x.completion_time,
+          CONVERT(DATETIME, '9999-12-31', 120)
+      ) <= x.requested_start
+
+   OR x.acknowledged_at < x.created_at
+
+   OR x.acknowledged_at > x.requested_start;
+
+
+INSERT INTO #Checks
+VALUES
+(
+    'Invalid advisory acknowledgement rows',
+    @InvalidAck,
+    '= 0',
+    IIF(@InvalidAck = 0, 'PASS', 'FAIL')
+);
+DECLARE @MissingAck BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.BOOKING b
+    JOIN dbo.MAINTENANCERECORD m ON m.space_code=b.space_code
+    LEFT JOIN dbo.BOOKING_ADVISORY_ACK a ON a.booking_id=b.booking_id AND a.maintenance_id=m.maintenance_id
+    WHERE m.impact_level='advisory' AND m.maintenance_status IN ('Reported','In Progress')
+      AND m.start_time<b.requested_end AND ISNULL(m.completion_time,CONVERT(DATETIME,'9999-12-31',120))>b.requested_start
+      AND a.ack_id IS NULL
+);
+DECLARE @DuplicateAck BIGINT =
+(
+    SELECT COUNT_BIG(*) FROM (SELECT booking_id,maintenance_id FROM dbo.BOOKING_ADVISORY_ACK GROUP BY booking_id,maintenance_id HAVING COUNT_BIG(*)>1) d
+);
+INSERT #Checks VALUES
+('Invalid advisory acknowledgements', @InvalidAck, '= 0', IIF(@InvalidAck=0, 'PASS', 'FAIL')),
+('Missing required advisory acknowledgements', @MissingAck, '= 0', IIF(@MissingAck=0, 'PASS', 'FAIL')),
+('Duplicate acknowledgement pairs', @DuplicateAck, '= 0', IIF(@DuplicateAck=0, 'PASS', 'FAIL')),
+('Bookings acknowledging multiple advisories', (SELECT COUNT_BIG(*) FROM (SELECT booking_id FROM dbo.BOOKING_ADVISORY_ACK GROUP BY booking_id HAVING COUNT_BIG(*)>1) x), '> 0', IIF((SELECT COUNT_BIG(*) FROM (SELECT booking_id FROM dbo.BOOKING_ADVISORY_ACK GROUP BY booking_id HAVING COUNT_BIG(*)>1) x)>0, 'PASS', 'FAIL'));
+
+DECLARE @InvalidMaintenanceTime BIGINT = (SELECT COUNT_BIG(*) FROM dbo.MAINTENANCERECORD WHERE completion_time IS NOT NULL AND completion_time<=start_time);
+DECLARE @InvalidHistory BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.MAINTENANCE_IMPACT_HISTORY h
+    JOIN dbo.MAINTENANCERECORD m ON m.maintenance_id=h.maintenance_id
+    LEFT JOIN dbo.[USER] u ON u.user_id=h.changed_by_user_id
+    WHERE h.old_impact_level=h.new_impact_level OR h.changed_at<m.start_time
+       OR (m.completion_time IS NOT NULL AND h.changed_at>=m.completion_time)
+       OR u.user_id IS NULL OR u.role NOT IN ('Facility Staff','Facility Manager')
+);
+DECLARE @BrokenHistoryChain BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM
+    (
+        SELECT h.maintenance_id, h.old_impact_level,
+               LAG(h.new_impact_level) OVER (PARTITION BY h.maintenance_id ORDER BY h.changed_at,h.history_id) AS prior_new
+        FROM dbo.MAINTENANCE_IMPACT_HISTORY h
+    ) x
+    WHERE x.prior_new IS NOT NULL AND x.old_impact_level<>x.prior_new
+);
+DECLARE @HistoryCurrentMismatch BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.MAINTENANCERECORD m
+    CROSS APPLY
+    (
+        SELECT TOP (1) h.new_impact_level
+        FROM dbo.MAINTENANCE_IMPACT_HISTORY h
+        WHERE h.maintenance_id=m.maintenance_id
+        ORDER BY h.changed_at DESC,h.history_id DESC
+    ) latest
+    WHERE latest.new_impact_level<>m.impact_level
+);
+INSERT #Checks VALUES
+('Invalid maintenance time order', @InvalidMaintenanceTime, '= 0', IIF(@InvalidMaintenanceTime=0, 'PASS', 'FAIL')),
+('Invalid impact-history events', @InvalidHistory, '= 0', IIF(@InvalidHistory=0, 'PASS', 'FAIL')),
+('Broken impact-history chains', @BrokenHistoryChain, '= 0', IIF(@BrokenHistoryChain=0, 'PASS', 'FAIL')),
+('Impact history/current mismatches', @HistoryCurrentMismatch, '= 0', IIF(@HistoryCurrentMismatch=0, 'PASS', 'FAIL')),
+('Escalation events', (SELECT COUNT_BIG(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY WHERE old_impact_level='advisory' AND new_impact_level='out-of-service'), '> 0', IIF((SELECT COUNT_BIG(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY WHERE old_impact_level='advisory' AND new_impact_level='out-of-service')>0, 'PASS', 'FAIL')),
+('Downgrade events', (SELECT COUNT_BIG(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY WHERE old_impact_level='out-of-service' AND new_impact_level='advisory'), '> 0', IIF((SELECT COUNT_BIG(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY WHERE old_impact_level='out-of-service' AND new_impact_level='advisory')>0, 'PASS', 'FAIL'));
+
+DECLARE @UnexplainedOosOverlap BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.BOOKING b
+    JOIN dbo.MAINTENANCERECORD m ON m.space_code=b.space_code
+    WHERE b.booking_status IN ('Approved','Checked In','Completed','No-Show')
+      AND m.impact_level='out-of-service'
+      AND m.start_time<b.requested_end AND ISNULL(m.completion_time,CONVERT(DATETIME,'9999-12-31',120))>b.requested_start
+      AND NOT EXISTS
+      (
+          SELECT 1 FROM dbo.MAINTENANCE_IMPACT_HISTORY h
+          WHERE h.maintenance_id=m.maintenance_id
+            AND h.old_impact_level='advisory' AND h.new_impact_level='out-of-service'
+            AND h.changed_at>b.decision_time
+      )
+);
+DECLARE @EscalationAffected BIGINT =
+(
+    SELECT COUNT_BIG(DISTINCT b.booking_id)
+    FROM dbo.MAINTENANCE_IMPACT_HISTORY h
+    JOIN dbo.MAINTENANCERECORD m ON m.maintenance_id=h.maintenance_id
+    JOIN dbo.BOOKING b ON b.space_code=m.space_code
+    WHERE h.old_impact_level='advisory' AND h.new_impact_level='out-of-service'
+      AND b.booking_status IN ('Approved','Checked In','Completed','No-Show')
+      AND b.decision_time<h.changed_at
+      AND b.requested_start<ISNULL(m.completion_time,CONVERT(DATETIME,'9999-12-31',120))
+      AND b.requested_end>m.start_time
+);
+INSERT #Checks VALUES
+('Unexplained out-of-service overlaps', @UnexplainedOosOverlap, '= 0', IIF(@UnexplainedOosOverlap=0, 'PASS', 'FAIL')),
+('Escalation-affected bookings', @EscalationAffected, '> 0', IIF(@EscalationAffected>0, 'PASS', 'FAIL'));
+
+DECLARE @Orphans BIGINT = 0;
+
+/* BOOKING */
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.BOOKING AS b
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.SPACE AS s
+    WHERE s.space_code = b.space_code
+);
+
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.BOOKING AS b
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.[USER] AS u
+    WHERE u.user_id = b.requester_id
+);
+
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.BOOKING AS b
+WHERE b.approver_id IS NOT NULL
+  AND NOT EXISTS
+  (
+      SELECT 1
+      FROM dbo.[USER] AS u
+      WHERE u.user_id = b.approver_id
+  );
+
+/* SPACE_FACILITY */
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.SPACE_FACILITY AS sf
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.SPACE AS s
+    WHERE s.space_code = sf.space_code
+);
+
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.SPACE_FACILITY AS sf
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.FACILITY AS f
+    WHERE f.facility_id = sf.facility_id
+);
+
+/* MAINTENANCERECORD */
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.MAINTENANCERECORD AS m
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.SPACE AS s
+    WHERE s.space_code = m.space_code
+);
+
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.MAINTENANCERECORD AS m
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.[USER] AS u
+    WHERE u.user_id = m.reporter_id
+);
+
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.MAINTENANCERECORD AS m
+WHERE m.assigned_staff_id IS NOT NULL
+  AND NOT EXISTS
+  (
+      SELECT 1
+      FROM dbo.[USER] AS u
+      WHERE u.user_id = m.assigned_staff_id
+  );
+
+/* USAGESESSION */
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.USAGESESSION AS us
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.BOOKING AS b
+    WHERE b.booking_id = us.booking_id
+);
+
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.USAGESESSION AS us
+WHERE us.check_in_staff_id IS NOT NULL
+  AND NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.[USER] AS u
+    WHERE u.user_id = us.check_in_staff_id
+);
+
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.USAGESESSION AS us
+WHERE us.check_out_staff_id IS NOT NULL
+  AND NOT EXISTS
+  (
+      SELECT 1
+      FROM dbo.[USER] AS u
+      WHERE u.user_id = us.check_out_staff_id
+  );
+
+/* BOOKING_ADVISORY_ACK */
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.BOOKING_ADVISORY_ACK AS ack
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.BOOKING AS b
+    WHERE b.booking_id = ack.booking_id
+);
+
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.BOOKING_ADVISORY_ACK AS ack
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.MAINTENANCERECORD AS m
+    WHERE m.maintenance_id = ack.maintenance_id
+);
+
+/* MAINTENANCE_IMPACT_HISTORY */
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.MAINTENANCE_IMPACT_HISTORY AS h
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.MAINTENANCERECORD AS m
+    WHERE m.maintenance_id = h.maintenance_id
+);
+
+SELECT @Orphans += COUNT_BIG(*)
+FROM dbo.MAINTENANCE_IMPACT_HISTORY AS h
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.[USER] AS u
+    WHERE u.user_id = h.changed_by_user_id
+);
+
+INSERT INTO #Checks
+VALUES
+(
+    'Foreign-key orphan rows',
+    @Orphans,
+    '= 0',
+    IIF(@Orphans = 0, 'PASS', 'FAIL')
+);
+
+DECLARE @FacilityCombinationCount BIGINT;
+WITH FacilitySets AS
+(
+    SELECT space_code, STRING_AGG(CONVERT(VARCHAR(MAX),facility_id), ',') WITHIN GROUP (ORDER BY facility_id) AS facility_set
+    FROM dbo.SPACE_FACILITY
+    GROUP BY space_code
+)
+SELECT @FacilityCombinationCount=COUNT_BIG(*) FROM (SELECT facility_set FROM FacilitySets GROUP BY facility_set) x;
+
+DECLARE @DisabledTriggers BIGINT =
+(
+    SELECT COUNT_BIG(*) FROM sys.triggers
+    WHERE parent_id IN (OBJECT_ID('dbo.BOOKING'),OBJECT_ID('dbo.MAINTENANCERECORD'),OBJECT_ID('dbo.USAGESESSION'))
+      AND is_disabled=1
+);
+
+INSERT #Checks VALUES
+('Buildings represented', (SELECT COUNT_BIG(DISTINCT building) FROM dbo.SPACE), '>= 3', IIF((SELECT COUNT_BIG(DISTINCT building) FROM dbo.SPACE)>=3, 'PASS', 'FAIL')),
+('Distinct capacities', (SELECT COUNT_BIG(DISTINCT capacity) FROM dbo.SPACE), '>= 10', IIF((SELECT COUNT_BIG(DISTINCT capacity) FROM dbo.SPACE)>=10, 'PASS', 'FAIL')),
+('Distinct facility combinations', @FacilityCombinationCount, '>= 8', IIF(@FacilityCombinationCount>=8, 'PASS', 'FAIL')),
+('Weekdays represented', (SELECT COUNT_BIG(DISTINCT DATEPART(WEEKDAY,requested_start)) FROM dbo.BOOKING), '= 7', IIF((SELECT COUNT_BIG(DISTINCT DATEPART(WEEKDAY,requested_start)) FROM dbo.BOOKING)=7, 'PASS', 'FAIL')),
+('Start hours represented', (SELECT COUNT_BIG(DISTINCT DATEPART(HOUR,requested_start)) FROM dbo.BOOKING), '>= 7', IIF((SELECT COUNT_BIG(DISTINCT DATEPART(HOUR,requested_start)) FROM dbo.BOOKING)>=7, 'PASS', 'FAIL')),
+('Disabled protected-table triggers', @DisabledTriggers, '= 0', IIF(@DisabledTriggers=0, 'PASS', 'FAIL'));
+
+SELECT check_name, actual_value, expected_condition, result FROM #Checks ORDER BY check_name;
+SELECT IIF(EXISTS(SELECT 1 FROM #Checks WHERE result='FAIL'), 'FAIL', 'PASS') AS overall_result,
+       SUM(CASE WHEN result='PASS' THEN 1 ELSE 0 END) AS passed_checks,
+       SUM(CASE WHEN result='FAIL' THEN 1 ELSE 0 END) AS failed_checks
+FROM #Checks;
+
+SELECT COUNT_BIG(*) AS booking_count, MIN(requested_start) AS minimum_booking_start, MAX(requested_end) AS maximum_booking_end FROM dbo.BOOKING;
+SELECT booking_status, COUNT_BIG(*) AS booking_count FROM dbo.BOOKING GROUP BY booking_status ORDER BY booking_status;
+SELECT approval_path, COUNT_BIG(*) AS booking_count FROM dbo.BOOKING GROUP BY approval_path ORDER BY approval_path;
+SELECT CASE WHEN MONTH(requested_start)>=9 THEN YEAR(requested_start) ELSE YEAR(requested_start)-1 END AS academic_year_start, COUNT_BIG(*) AS booking_count FROM dbo.BOOKING GROUP BY CASE WHEN MONTH(requested_start)>=9 THEN YEAR(requested_start) ELSE YEAR(requested_start)-1 END ORDER BY academic_year_start;
+SELECT DATENAME(WEEKDAY,requested_start) AS weekday_name, DATEPART(HOUR,requested_start) AS start_hour, COUNT_BIG(*) AS booking_count FROM dbo.BOOKING GROUP BY DATENAME(WEEKDAY,requested_start), DATEPART(WEEKDAY,requested_start), DATEPART(HOUR,requested_start) ORDER BY DATEPART(WEEKDAY,requested_start), start_hour;
+SELECT space_code, COUNT_BIG(*) AS booking_count FROM dbo.BOOKING GROUP BY space_code ORDER BY booking_count DESC, space_code;
+SELECT impact_level, maintenance_status, COUNT_BIG(*) AS maintenance_count FROM dbo.MAINTENANCERECORD GROUP BY impact_level, maintenance_status ORDER BY impact_level, maintenance_status;
+SELECT COUNT_BIG(*) AS acknowledgement_count, COUNT_BIG(DISTINCT booking_id) AS acknowledged_booking_count FROM dbo.BOOKING_ADVISORY_ACK;
+SELECT t.name AS table_name, tr.name AS trigger_name, tr.is_disabled FROM sys.triggers tr JOIN sys.tables t ON t.object_id=tr.parent_id WHERE t.name IN ('BOOKING','MAINTENANCERECORD','USAGESESSION') ORDER BY t.name,tr.name;
+
+IF EXISTS (SELECT 1 FROM #Checks WHERE result='FAIL')
+    THROW 51402, 'Step 14 validation failed. Inspect the FAIL rows above.', 1;

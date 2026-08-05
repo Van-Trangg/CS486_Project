@@ -318,7 +318,7 @@ BEGIN
     DECLARE @CompletionTime DATETIME;
 
     IF @MaintenanceId IS NULL OR @ChangedByUserId IS NULL
-        THROW 51014, 'MaintenanceId and ChangedByUserId are required.', 1;
+        THROW 51030, 'MaintenanceId and ChangedByUserId are required.', 1;
 
     /* See the matching ownership rule in sp_ApproveBooking. */
     IF @@TRANCOUNT <> 0
@@ -420,7 +420,7 @@ GO
    or decision_note. Instant and staff approval paths both invoke
    dbo.sp_ApproveBooking; callers retry deadlock error 1205 outside the proc.
    ========================================================= */
-DENY UPDATE ON OBJECT::dbo.BOOKING
+DENY UPDATE 
 (
     booking_status,
     approver_id,
@@ -428,9 +428,22 @@ DENY UPDATE ON OBJECT::dbo.BOOKING
     decision_note,
     approval_path
 )
+ON OBJECT::dbo.BOOKING
 TO AppServiceRole;
 GO
 
+DENY UPDATE
+(
+    impact_level
+)
+ON OBJECT::dbo.MAINTENANCERECORD
+TO AppServiceRole;
+GO
+
+DENY INSERT
+ON OBJECT::dbo.MAINTENANCE_IMPACT_HISTORY
+TO AppServiceRole;
+GO
 GRANT EXECUTE
 ON OBJECT::dbo.sp_ApproveBooking
 TO AppServiceRole;

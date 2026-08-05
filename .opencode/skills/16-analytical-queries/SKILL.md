@@ -26,6 +26,7 @@ Do not modify approved Phase 1 or earlier Phase 2 output files unless the user e
 
 1. Run `ls -la` and inspect the repository structure.
 2. Read the baseline schema and migration files:
+   - `outputs/03-logical-design-G02.md`
    - `outputs/05-db-definition-G02.sql`
    - `outputs/10-schema-migration-G02.sql`
    - `outputs/14-data-generator-G02/01-generate-data.sql`

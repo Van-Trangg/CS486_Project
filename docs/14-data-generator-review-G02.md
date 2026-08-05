@@ -1,108 +1,260 @@
-# Step 14 Data Generator Review - G02
+# 1. Review Summary
 
-## Review Scope
+**Package reviewed:** `outputs/14-new-data-generator-G02/`, including every required package file.
 
-Reviewed the current package against `outputs/05-db-definition-G02.sql`, `outputs/09-updated-erd-and-logical-design-G02.md`, `outputs/10-schema-migration-G02.sql`, `outputs/11-concurrency-design-G02.md`, `outputs/12-concurrency-implementation-G02.sql`, `req/business-requirement-phase2.md`, and relevant reviews under `docs/`.
+**Review type:** Static package review using supplied runtime validation evidence for database `Step14ReviewG02_20260805`. The generator, dry-run, validation SQL, and database lifecycle operations were not rerun, as explicitly prohibited. A Python AST parse was used for a non-executing syntax check.
 
-The requested optional instruction file `.opencode/skills/step-14-review-SKILL.md` does not exist. The approved project artifacts and requested workflow were used instead.
+**Most important strength:** The package combines strict target-database guards, deterministic generation, exact migrated-schema mappings, correct interval-based conflict avoidance, and scalable batched loading. Independent runtime validation reports `49` passed checks and `0` failed checks.
 
-Files present and read in full:
+**Most important risk:** The named generator runtime transcript `docs/14-generator-runtime-output-G02.txt` is not present in the repository. The supplied validation transcript proves the resulting database contents but does not independently preserve the Python version, ODBC driver, generator exit code, elapsed load time, or reset/rerun outcome.
 
-- `outputs/14-data-generator-G02/01-generate-data.sql`
-- `outputs/14-data-generator-G02/02-validate-data.sql`
+**Observed result:** `105,000` bookings from `2023-09-01 08:00:00.000` through `2026-05-31 20:00:00.000`, covering academic years beginning `2023`, `2024`, and `2025`.
 
-## Execution Status
+**Overall Step 15 readiness:** The generated database is suitable for Step 15. No blocking or major issue was found; only minor evidence and general configuration-validation improvements remain.
 
-Static review only. `sqlcmd` and a local SQL Server instance are available, but runtime generation was not performed: `01-generate-data.sql` hardcodes `USE University` and deletes all rows from the project tables. Running it against the shared `University` database would not be a safe disposable-database test. No actual booking count, academic-year span, status counts, overlap count, second-run result, or runtime errors are claimed by this review.
+# 2. Files Reviewed
 
-## Schema Compatibility
+- `.opencode/skills/14-data-generator/new-SKILL.md`
+- `.opencode/skills/14-data-generator/new-review-SKILL.md`
+- `outputs/14-new-data-generator-G02/generate_data.py`
+- `outputs/14-new-data-generator-G02/generator_config.json`
+- `outputs/14-new-data-generator-G02/requirements.txt`
+- `outputs/14-new-data-generator-G02/README.md`
+- `outputs/14-new-data-generator-G02/02-validate-data.sql`
+- `req/business-requirement-phase2.md`
+- `outputs/03-logical-design-G02.md`
+- `outputs/05-db-definition-G02.sql`
+- `outputs/09-updated-erd-and-logical-design-G02.md`
+- `outputs/10-schema-migration-G02.sql`
+- `outputs/11-concurrency-design-G02.md`
+- `outputs/12-concurrency-implementation-G02.sql`
+- Relevant Step 5, Step 8 through Step 14 reviews and accepted Step 12 feedback under `docs/`
+- `docs/14-generator-validation-output-G02.txt`
 
-| Area | Static result | Evidence |
+All five required package files exist and are non-empty. No optional helper file is present or required. The JSON is structurally valid, and `requirements.txt` declares the only third-party import, `pyodbc`.
+
+# 3. Safety Assessment
+
+| Safety Check | Expected | Finding | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| Target selection | No hardcoded target database | `--database` supplies the connection target; no `USE` statement exists | Pass | `build_connection_string()`, CLI |
+| Protected database | Never target `University` | `University` is unconditionally refused, including with bypass | Pass | `validate_target_database()` |
+| Disposable guard | Unsafe names rejected by default | Only `Step14*`, `Test*`, or `Dev*` pass by default | Pass | `DISPOSABLE_PREFIXES` |
+| Explicit bypass | Required for other names | `--allow-non-disposable` is explicit and emits a warning | Pass | CLI and target validation |
+| Reset policy | Explicit and disposable-only | Reset requires `--reset-generated-data`; non-disposable reset is always rejected | Pass | `main()`, `prepare_target()` |
+| Existing data | No implicit overwrite | Any non-empty target fails unless disposable reset is authorized | Pass | `prepare_target()` |
+| Destructive SQL | Guarded | Only broad `DELETE` in explicit disposable reset; no `TRUNCATE`, `DROP`, `USE University`, or `ALTER DATABASE` | Pass | Destructive-SQL search |
+| Dry-run writes | None | Dry-run returns before trigger changes, reset, identity operations, or inserts | Pass statically | `main()` dry-run branch |
+| Credentials | No plaintext secret | Password is read from the environment named by `--password-env` | Pass | `build_connection_string()` |
+| Connection context | Exact target required | `SELECT DB_NAME()` must equal the CLI database before writes | Pass | `inspect_schema()` |
+| Trigger restoration | Restore original enabled set | Enabled protected-table triggers are captured, disabled, and restored in `finally` | Pass runtime | Validator reports `0` disabled protected-table triggers |
+
+The reset deletes all rows in the nine project tables, but only after both an explicit reset flag and disposable-name verification. Trigger disablement is limited to the three tables whose Phase 1/Step 12 triggers would reject historical benchmark states. Foreign keys and check constraints remain enabled and trusted.
+
+# 4. Schema Compatibility
+
+| Area | Expected | Generator Mapping | Status | Notes |
+| --- | --- | --- | --- | --- |
+| Schema and tables | Nine `dbo` data tables after Steps 5 and 10 | Exact names and `dbo` qualification | Pass runtime | All loaded and validated |
+| `USER` | Seven baseline columns and six role values | Exact columns, lengths-compatible values, unique IDs/emails | Pass runtime | 600 rows; six roles and three statuses |
+| `SPACE` | Nine baseline columns and approved domains | Exact columns and values | Pass runtime | 60 rows; all six types and five statuses |
+| `FACILITY` | Identity PK and unique name | Explicit deterministic identities 1-12 | Pass runtime | 12 unique facilities |
+| `SPACE_FACILITY` | Composite PK and valid domains | Exact five-column mapping | Pass runtime | 343 rows; no orphans |
+| `BOOKING` | Baseline fields plus `approval_path`; server `row_version` | Inserts every writable column and omits server-generated `row_version` | Pass runtime | 105,000 rows and all domains |
+| `USAGESESSION` | Booking PK/FK and staff references | Exact eight-column mapping | Pass runtime | 61,950 valid rows |
+| Maintenance | `impact_level` with exact lowercase values | Exact eleven-column mapping | Pass runtime | 3,500 rows and both impacts |
+| Advisory acknowledgement | Identity PK, two FKs, unique pair | Exact four-column mapping | Pass runtime | 58,962 valid rows; no duplicates or omissions |
+| Impact history | Identity PK, maintenance/user FKs, impact domains | Exact six-column mapping | Pass runtime | 700 valid rows; consistent chains/current state |
+| Identity metadata | Five migrated identity columns | `IDENTITY_INSERT` only for those five tables | Pass | Matches Steps 5 and 10 |
+| Insertion order | Parent before child | User, facility, space, space-facility, maintenance, booking, usage, acknowledgement, history | Pass | FK-safe |
+
+`inspect_schema()` requires exact column sets for all nine tables, verifies the five identity mappings, checks correctness-sensitive data types/nullability, and rejects disabled or untrusted foreign-key/check constraints. The successful load and zero-orphan validation provide runtime confirmation beyond the static mapping.
+
+# 5. Configuration and Reproducibility
+
+| Setting | Configured Value | Assessment |
+| --- | ---: | --- |
+| Booking count | 105,000 | Meets the required minimum and was observed |
+| Academic-year count | 3 | Meets the minimum and was observed |
+| Batch size | 10,000 | Positive, configurable, and used by bulk insertion |
+| Random seed | 48,602 | Fixed and configurable |
+| Users | 600 | Above required benchmark minimum |
+| Spaces | 60 | Above required benchmark minimum |
+| Maintenance records | 3,500 | Above required benchmark minimum |
+| Facilities | 12 | Matches the deterministic catalog |
+| Date range | 2023-09-01 to 2026-05-31 | Three observed academic years |
+
+Configuration loading rejects missing and unknown keys, unsupported statuses, insufficient counts, non-positive batch sizes, invalid ratios, date-order errors, and empty ODBC driver names. Status ratios must contain exactly all seven schema statuses and sum to `1.0` without silent normalization.
+
+Generation uses a local `random.Random(config.random_seed)` instance. No Faker or uncontrolled random source is used. Explicit generated identity values make logical rows and foreign-key relationships deterministic; the README correctly notes that SQL Server `row_version` values remain server-generated.
+
+The general date-range validator counts covered calendar years rather than deriving distinct academic years using the same September boundary as the SQL validator. The current configuration is unaffected because runtime validation proves three academic years, but another accepted date range could theoretically under-cover the configured academic-year count.
+
+# 6. Generation Logic Review
+
+## Users
+
+- IDs and emails are deterministic and unique.
+- All six approved roles and all three account statuses are represented.
+- Approval, assignment, usage-session, and impact-change staff references use active Facility Staff or Facility Manager users only.
+
+## Spaces and Facilities
+
+- Six space types, five statuses, four buildings, 21 capacities, and 19 facility combinations were observed.
+- Facility quantity and operation status vary within the approved domains.
+- Popular, medium, and lower-volume space pools provide useful conflict-check selectivity.
+- Capacity and all-facility room-finder predicates have both qualifying and non-qualifying spaces.
+
+## Bookings
+
+- All seven statuses are deterministically allocated: Approved 15,750; Cancelled 8,400; Checked In 4,200; Completed 57,750; No-Show 5,250; Pending 3,150; Rejected 10,500.
+- Both approval paths were observed: Instant 36,905 and Staff 68,095.
+- Instant selection is limited to configured eligible Meeting Room and Student Workspace rows.
+- Staff decisions reference active staff; instant decisions use a null approver.
+- Rejected rows have a reason, pending rows have no decision, and participant counts stay within space capacity.
+- Completed and Checked In rows receive usage sessions; runtime checks found no missing or unsupported sessions.
+- Demand is weighted toward Fall/Spring dates, weekdays, peak hours, and popular spaces.
+
+## Approved-Booking Conflict Invariant
+
+The in-memory schedule stores complete `(start, end)` intervals per space and rejects a new approved-lifecycle interval unless every existing interval is separate or adjacent. This is equivalent to negating the required half-open conflict predicate:
+
+```text
+existing_start < new_end
+and existing_end > new_start
+```
+
+Durations vary from one to three hours, so this is stronger than checking exact start slots. The independent SQL self-join uses the same half-open rule and observed `0` approved-lifecycle overlap pairs across all 105,000 bookings.
+
+## Maintenance and Acknowledgements
+
+- Both advisory and out-of-service impacts, all four statuses, all six problem types, and open/completed records were observed.
+- Multiple broad active advisories exist on selected spaces, allowing one booking to acknowledge multiple advisories.
+- Escalation and downgrade history occurs within maintenance lifecycles and forms valid transition chains.
+- Runtime validation observed 400 escalation events, 300 downgrade events, and 604 escalation-affected bookings.
+- Acknowledgements reference the same space, an overlapping advisory period, and a timestamp between booking creation and requested start.
+- Runtime validation found zero invalid, missing, duplicate, or orphan acknowledgement rows.
+
+# 7. Bulk-Load and Performance Review
+
+| Requirement | Finding | Status |
 | --- | --- | --- |
-| Tables and columns | Compatible | All referenced Phase 1 and Phase 2 table/column names exist in Steps 5 and 10. |
-| Keys and references | Compatible | Inserts use generated identities and values sourced from parent tables. `BOOKING_ADVISORY_ACK` uses the migrated unique booking-maintenance pair. |
-| Booking statuses | Compatible | Uses only `Pending`, `Approved`, `Rejected`, `Cancelled`, `Checked In`, `Completed`, and `No-Show`. |
-| Approval paths | Compatible | Uses only `Instant` and `Staff`. |
-| Maintenance impacts | Compatible | Uses only `advisory` and `out-of-service`. |
-| Advisory acknowledgement structure | Structurally compatible, semantically incorrect | Uses `booking_id`, `maintenance_id`, and `acknowledged_at`, but includes resolved advisories. |
-| Semester and academic year | Compatible with Step 9 date-range model | No semester table is required. Dates span the intended September 2023 through approximately May 2026 grid, subject to runtime confirmation. |
+| Driver | `pyodbc` is declared and imported only for connected execution | Pass |
+| Fast execution | `cursor.fast_executemany = True` precedes `executemany()` | Pass |
+| Batching | Uses configurable `batch_size` | Pass |
+| Transactions | Commits once per batch, not per row | Pass |
+| Failure handling | Rolls back the failing batch and stops | Pass statically |
+| Failure visibility | Reports table and row range; no silent skip | Pass |
+| Progress | Prints cumulative inserted rows per table | Pass |
+| Procedure use | Does not call `sp_ApproveBooking` per historical booking | Pass |
+| Resource cleanup | Connection context manager and trigger-restoration `finally` | Pass |
 
-## Requirement and Distribution Coverage
+The generator intentionally permits committed earlier batches to remain after a later batch failure. This is documented, and recovery requires an explicit reset in the same verified disposable database. That policy is acceptable for this benchmark loader and avoids one unbounded transaction over the full dataset.
 
-| Requirement | Static assessment |
+# 8. Data Distribution Review
+
+| Distribution | Runtime-Observed Result | Assessment |
+| --- | --- | --- |
+| Booking volume | 105,000 | Sufficient for Step 15 |
+| Academic years | 2023, 2024, 2025 starts | Three-year coverage |
+| Statuses | All seven; counts listed above | Useful selective/non-selective predicates |
+| Approval paths | 36,905 Instant; 68,095 Staff | Both paths are substantial |
+| Weekdays | All seven | Weekday-skew workload observed |
+| Start hours | Nine distinct hours | Peak/off-peak workload observed |
+| Spaces | 44 booked spaces with visible high/medium/low tiers | Useful conflict-query selectivity |
+| Capacity | 21 distinct capacities | Useful room-finder selectivity |
+| Facilities | 19 distinct combinations | Useful all-facility matching cases |
+| Maintenance | Both impacts across all statuses | Nontrivial maintenance workload |
+| Acknowledgements | 58,962 rows for 29,481 bookings | Nontrivial advisory workload |
+| Escalation effects | 604 affected bookings | Non-empty Report 4 workload |
+
+# 9. Validation SQL Assessment
+
+`02-validate-data.sql` contains no `USE` statement, refuses `University`, and can be run independently with `sqlcmd -d`. It checks or reports:
+
+1. Booking count, major-table row counts, date span, and academic-year count.
+2. Counts by status, approval path, academic year, weekday/hour, and space.
+3. User, space, facility, purpose, maintenance, and operation-status domain coverage.
+4. Booking, decision, usage-session, and maintenance chronology.
+5. Capacity validity and status/path field combinations.
+6. Approved-lifecycle overlaps with the correct half-open predicate.
+7. Usage-session completeness and exclusivity.
+8. Advisory acknowledgement temporal validity, same-space relationship, completeness, uniqueness, and multiple-advisory coverage.
+9. Impact-history lifecycle, actor role, chain, current-state consistency, escalations, and downgrades.
+10. Unexplained out-of-service overlaps and intentional escalation-affected bookings.
+11. Foreign-key orphans across all dependent tables.
+12. Building, capacity, facility-combination, weekday, hour, and per-space variation.
+13. Protected trigger restoration.
+14. Overall PASS/FAIL and a raised SQL error when any required check fails.
+
+The supplied transcript reports `49 PASS`, `0 FAIL`, and overall `PASS`. One acknowledgement-validity result is inserted twice under closely related labels; this is redundant but does not weaken the underlying check or readiness conclusion.
+
+# 10. Runtime Results
+
+The generator and validator were not rerun during this review. The user supplied runtime validation evidence and instructed that it be treated as valid for the current package state.
+
+| Runtime Item | Observed Value |
 | --- | --- |
-| At least 100,000 bookings | Pass by design: 105,000 planned bookings plus escalation-affected rows. |
-| At least three academic years | Pass by design for the overall `BOOKING` date grid. |
-| Cancelled and no-show cases | Pass by design: explicit 8% `Cancelled` and 5% `No-Show` allocations. |
-| Maintenance impact levels | Pass by design: 3,500 records with both permitted levels. |
-| Instant and staff paths | Pass by design, although instant cases are limited to qualifying workspace/meeting-room rows. |
-| Capacity and facility combinations | Pass by design: 60 spaces across six types, varying capacities, 12 facilities, and type-specific facility sets. |
-| Weekday, hour, and semester variation | Pass with limitations: all weekdays occur, but bookings use only five fixed two-hour start slots and include summer dates. |
-| Popular and less-popular spaces | Pass by design: the first 10 spaces, next 25, and remaining spaces receive materially different booking volumes. |
-| Conflict-check selectivity | Pass by design: large per-space approved subsets and intentional space skew support a conflict-check index comparison. |
-| Room-finder selectivity | Pass by design: capacities and facilities vary by space type, although facility combinations within each type are uniform. |
-| Nontrivial analytical results | Partial: reports can use populated early semesters, but the generator does not demonstrate approved bookings throughout the full third academic year. |
+| Database | `Step14ReviewG02_20260805` |
+| Booking count | 105,000 |
+| Minimum booking start | 2023-09-01 08:00:00.000 |
+| Maximum booking end | 2026-05-31 20:00:00.000 |
+| Academic-year starts | 2023, 2024, 2025 |
+| Validation checks | 49 passed, 0 failed |
+| Approved-lifecycle overlaps | 0 |
+| Maintenance rows | 3,500 |
+| Advisory acknowledgements | 58,962 |
+| Impact-history rows | 700 |
+| Foreign-key orphans | 0 |
+| Unexplained out-of-service overlaps | 0 |
+| Disabled protected-table triggers | 0 |
 
-## Integrity and Safety Findings
+The named `docs/14-generator-runtime-output-G02.txt` transcript was not found. Consequently, Python version, ODBC driver, generator exit code, elapsed generation time, batch-progress transcript, and reset/rerun behavior are not independently available in the repository. This does not invalidate the supplied SQL validation evidence for the current generated database.
 
-### R14-1 - Unsafe destructive reset and no atomic recovery
+CLI help, configuration execution, dry-run, full generation, and SQL validation were not rerun because the user explicitly prohibited executing `generate_data.py`, another dry-run, the validator, or any database operation. Static CLI-to-README comparison passed. Non-executing Python AST parsing passed.
 
-- **Severity:** Blocking
-- **Evidence:** `01-generate-data.sql` lines 33-56 disable every relevant trigger; lines 63-78 delete all rows from the core and Phase 2 tables and reseed identities. The surrounding `TRY...CATCH` has no `BEGIN TRANSACTION` or rollback of the data reset (lines 30 and 801-827).
-- **Impact:** A runtime failure after any delete or partial insert leaves `University` partially populated. Re-running also removes unrelated project data rather than isolating a Step 14 benchmark dataset. Trigger re-enablement in `CATCH` does not restore deleted rows.
-- **Required revision:** Make the generator target an explicit disposable benchmark database or a clearly owned data namespace, document the scope, and protect reset/load operations with a transaction that rolls back on failure. Avoid disabling integrity triggers where possible; if a controlled bulk-load exception is unavoidable, restore them transactionally and validate all bypassed rules before commit.
+# 11. Issues Found
 
-### R14-2 - Advisory acknowledgement generation violates the approved active-advisory definition
+## Issue R14PY-1 - Academic-year configuration validation uses calendar-year coverage
 
-- **Severity:** Blocking
-- **Evidence:** Step 9 Decision 6 defines an active advisory as `impact_level = 'advisory'` and `maintenance_status IN ('Reported', 'In Progress')`. `01-generate-data.sql` lines 626-632 also includes `Resolved` advisory records in `#AdvMaint`, then creates acknowledgements from them at lines 635-646.
-- **Impact:** Acknowledgement rows can claim that a resolved advisory was disclosed at booking time. This does not satisfy the Phase 2 requirement to inform requesters of all active advisories and corrupts acknowledgement-dependent test and tuning data.
-- **Required revision:** Restrict acknowledgement generation and validation to open advisories (`Reported` and `In Progress`) that are active at the submission/acknowledgement time and overlap the requested period. Independently verify every qualifying booking-advisory pair has exactly one acknowledgement.
+- **Severity:** Minor
+- **Issue:** `validate_config()` compares the number of calendar years touched by the date range with `academic_year_count` rather than deriving distinct September-based academic years.
+- **Evidence:** `generate_data.py` lines 140-142 versus the academic-year expression in `02-validate-data.sql` lines 21-26.
+- **Why this matters:** A future configuration could pass static configuration validation while spanning fewer requested academic years under the project's academic-year definition.
+- **Impact on Step 15:** None for the current dataset; runtime validation proves three academic years.
+- **Suggested correction:** Derive distinct academic-year start values from the configured date range using the same September boundary as the SQL validator.
 
-### R14-3 - Validator does not independently prove acknowledgement correctness or required integrity properties
+## Issue R14PY-2 - Generator runtime transcript is unavailable
 
-- **Severity:** Major
-- **Evidence:** `02-validate-data.sql` lines 159-200 checks current `impact_level`, timestamps, and period overlap for existing acknowledgement rows but does not test open maintenance status, missing qualifying acknowledgements, duplicate acknowledgement pairs, or generic Phase 2 orphan/null audits. Lines 275-296 check selected booking and session rules only. It also lacks maintenance time-order, usage-session time-order, explicit orphan checks for the major and Phase 2 tables, duplicate-key checks, and labelled capacity/facility coverage checks.
-- **Impact:** The script can report a successful validation while data violates the acknowledgement rule or while required integrity evidence is absent. It validates generator assumptions rather than independently auditing the generated result.
-- **Required revision:** Add labelled pass/fail queries for invalid and missing acknowledgement pairs, duplicate pairs, null/orphan rows for all major tables, maintenance and usage-session ranges, key duplicates, and explicit capacity/facility coverage. Include academic-year counts using the documented September-to-May academic-year windows rather than only `YEAR(requested_start)`.
+- **Severity:** Observation
+- **Issue:** The named generator runtime evidence file is absent, while the independent validation transcript is present.
+- **Evidence:** `docs/14-generator-validation-output-G02.txt` exists; `docs/14-generator-runtime-output-G02.txt` was not found.
+- **Why this matters:** Load environment, elapsed time, exit code, batch progress, and reset/rerun behavior cannot be audited from repository evidence.
+- **Impact on Step 15:** No data-correctness blocker. The validated database is available and all 49 SQL checks passed.
+- **Suggested correction:** Preserve the original generator transcript if it remains available; do not rerun generation solely to recreate it without explicit authorization.
 
-### R14-4 - Approved-booking coverage is not demonstrably representative across all three academic years
+# 12. Scores
 
-- **Severity:** Major
-- **Evidence:** Active booking slot sequences for the ten popular spaces stop at 3,500 two-hour slots (lines 512-517), approximately 700 days after 2023-09-01. Later dates are allocated to non-active statuses only. The validator's only approved-date-span check (lines 344-352) counts calendar years, not academic-year reporting semesters.
-- **Impact:** The required approved-booking reports and a selected reporting-query index comparison may yield no representative approved result set for the 2025-2026 academic year, despite the overall table covering three years.
-- **Required revision:** Distribute `Approved` rows across Fall and Spring semesters in each of the three academic years, and add an academic-year/semester status breakdown with a pass/fail threshold appropriate to the report workload.
+| Category | Score |
+| --- | --- |
+| Package Completeness | 10/10 |
+| Schema Compatibility | 10/10 |
+| Database Safety | 10/10 |
+| Configuration Validation | 9/10 |
+| Reproducibility | 9/10 |
+| Generation Correctness | 10/10 |
+| Bulk-Load Scalability | 10/10 |
+| Validation Quality | 10/10 |
+| Step 15 Readiness | 9/10 |
 
-## Positive Escalation Scenario
+# 13. Required Revisions Before Step 15
 
-The package now intentionally adds escalation-affected approved bookings at lines 698-745. The source rows have advisory-to-out-of-service history and the final current maintenance impact is `out-of-service`. This is the appropriate type of positive scenario for Report 4, assuming the generated history, booking, and maintenance timing validate at runtime. The validator includes a positive check at lines 325-342, but runtime execution is still needed to verify a nonzero result.
+No blocking or major revision is required before Step 15.
 
-## Validator Coverage Summary
+The academic-year configuration check should be aligned with the September-based SQL definition when the generator is next maintained. Preserve the missing runtime transcript if it can be recovered without rerunning or changing the database.
 
-Present checks include table counts, overall date range, calendar-year and semester labels, booking status/path values, weekday/hour counts, populated-space volume, impact-level counts, acknowledgement totals, booking time order, capacity, approver role, approved overlaps, active out-of-service overlaps, usage-session alignment, trigger state, and escalation-affected bookings.
+# 14. Final Verdict
 
-Missing or inadequate required validation evidence includes:
+**READY FOR STEP 15 WITH MINOR REVISIONS**
 
-- Open-advisory eligibility and completeness of advisory acknowledgements.
-- Duplicate acknowledgement, key, and Phase 2-table relationship checks.
-- Null and orphan audits for all major and Phase 2 tables.
-- Maintenance and usage-session time-range checks.
-- Academic-year counting based on the Step 14 three-year requirement.
-- Explicit capacity and facility-combination coverage checks.
-- Second-run safety evidence and post-failure recovery evidence.
-
-## Step 15 Readiness
-
-The package has useful scale, set-based generation patterns, space-volume skew, facility/capacity variation, valid literal domains, and a planned escalation scenario. Those strengths do not overcome the active-advisory acknowledgement violation, incomplete independent validation, and unsafe reset behavior. Benchmark measurements performed before these are corrected would not rest on a trustworthy and reproducible Step 14 dataset.
-
-## Required Revisions Before Step 15
-
-1. Isolate generator ownership and make reset/load failure-atomic without deleting unrelated `University` data.
-2. Generate acknowledgements only for qualifying open advisory records and verify both invalid and missing pairs.
-3. Expand `02-validate-data.sql` with independent null, orphan, duplicate, time-range, acknowledgement, academic-year, and capacity/facility coverage audits.
-4. Ensure approved bookings occur in reportable Fall/Spring semesters across all three academic years and validate that distribution.
-5. Execute the clean schema-to-generator-to-validator sequence in a disposable database and record actual counts, spans, status/path counts, approved overlap count, escalation scenario count, errors, and second-run outcome.
-
-## Final Readiness Verdict
-
-**NOT READY FOR STEP 15**
+The package is safe, schema-compatible, reproducible, scalable, and supported by valid runtime evidence from a disposable database. The observed 105,000-row dataset spans three academic years, covers all required statuses and both approval paths, includes substantial maintenance and acknowledgement workloads, and has zero approved-lifecycle conflicts. The remaining items are minor and do not require data repair or regeneration before Step 15.
