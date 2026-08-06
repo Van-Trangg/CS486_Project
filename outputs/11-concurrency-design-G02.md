@@ -8,7 +8,7 @@
 
 **Quoted requirement:** *"Because users and staff may perform booking operations concurrently, multiple operations may check the availability of the same space before any of them records its result. Without appropriate concurrency control, conflicting bookings may be approved."* The BRA further requires: *"The system must ensure that two approved bookings cannot use the same space during overlapping time periods, regardless of whether the bookings are created through instant-booking or staff approval."*
 
-**The two approval paths involved:** Step 9 (Decision 3) introduced `BOOKING.approval_path` to distinguish an **instant-booking path** (approved automatically at submission, no staff involvement) from a **staff approval path** (request stays `Pending` until a staff member decides). Both paths can produce the same race:
+**The two approval paths involved:** Step 9 (Decision 3) introduced `BOOKING.resolution_path` to distinguish an **instant-booking path** (approved automatically at submission, no staff involvement) from a **staff approval path** (request stays `Pending` until a staff member decides). Both paths can produce the same race:
 
 1. Session A queries `BOOKING` for existing `Approved` rows on `space_code = X` overlapping the new request's time range. No conflict found.
 2. Before Session A commits, Session B performs the identical check for the same space and an overlapping window. Under read-committed isolation, Session B is not blocked by Session A's uncommitted work and also finds no conflict.
