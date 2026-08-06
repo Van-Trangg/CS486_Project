@@ -99,6 +99,115 @@ PRINT '';
 GO
 
 -- ============================================================
+-- Query 3: Available Spaces by Capacity, Facilities, and Time Period
+-- ============================================================
+/*
+1. Business Question:
+   Which campus spaces have at least the required capacity, possess all requested operational facilities, and are not occupied by approved bookings or out‑of‑service maintenance during a specified time period?
+
+2. Target User:
+   Facility Managers or Event Planners who need to find suitable rooms for meetings, classes, or events with specific equipment and capacity constraints.
+
+3. Business Value:
+   Provides a real‑time list of available spaces that meet complex criteria, reducing manual room hunting.
+   Enables efficient resource allocation and improves user satisfaction by quickly presenting viable options.
+
+4. Parameters:
+   @RequiredCapacity INT          – Minimum seating/occupancy capacity required.
+   @StartTime        DATETIME     – Beginning of the desired booking window.
+   @EndTime          DATETIME     – End of the desired booking window.
+   @RequiredFacilities TABLE      – A table variable containing facility_id(s) that the space must have (all must be operational). Populated before the query.
+
+5. Correctness Notes:
+   - Capacity: Only spaces with capacity >= @RequiredCapacity are considered.
+   - Availability Status: Spaces with current_status = 'Retired' or 'Temporarily Closed' are excluded.
+   - Facility Requirement: The space must have every facility listed in @RequiredFacilities and each must be marked 'Operational' in SPACE_FACILITY. 
+   - Booking Conflicts: Approved bookings that overlap the requested interval disqualify the space.
+   - Maintenance Conflicts: Only maintenance records with impact_level = 'out-of-service' and status in ('Reported', 'In Progress') that overlap the period are considered. 
+     Advisory maintenance does not block availability. An open‑ended maintenance (completion_time IS NULL) is treated as continuing indefinitely (9999-12-31).
+
+6. Expected Output Meaning:
+   - space_code      : Unique identifier of the space.
+   - space_name      : Descriptive name.
+   - space_type      : e.g., Classroom, Lab, Auditorium.
+   - building        : Building name.
+   - floor           : Floor number.
+   - room_number     : Room number.
+   - capacity        : Maximum occupancy.
+   - current_status  : Current operational status of the space.
+   The result set is ordered by capacity ascending, then space_code.
+*/
+
+PRINT '--- Query 3: Available Spaces by Capacity, Facilities, and Time Period ---';
+PRINT '--- Executing availability search ---';
+
+-- Declare and set parameters (example values)
+DECLARE @RequiredCapacity INT       = 30;
+DECLARE @StartTime        DATETIME  = '2026-08-10 09:00:00';
+DECLARE @EndTime          DATETIME  = '2026-08-10 11:00:00';
+
+-- Required facility list: populate with the facility_id values the caller needs
+DECLARE @RequiredFacilities TABLE (facility_id INT PRIMARY KEY);
+INSERT INTO @RequiredFacilities (facility_id) VALUES (1), (3), (5); -- example IDs
+
+DECLARE @RequiredFacilityCount INT = (SELECT COUNT(*) FROM @RequiredFacilities);
+
+SELECT
+    s.space_code,
+    s.space_name,
+    s.space_type,
+    s.building,
+    s.floor,
+    s.room_number,
+    s.capacity,
+    s.current_status
+FROM SPACE s
+WHERE
+    -- 1. Capacity requirement
+    s.capacity >= @RequiredCapacity
+
+    -- 2. Space must not be permanently unavailable (Retired / Temporarily Closed)
+    AND s.current_status NOT IN ('Retired', 'Temporarily Closed')
+
+    -- 3. Space must have ALL required facilities, each operational
+    AND @RequiredFacilityCount = (
+        SELECT COUNT(DISTINCT sf.facility_id)
+        FROM SPACE_FACILITY sf
+        JOIN @RequiredFacilities rf ON rf.facility_id = sf.facility_id
+        WHERE sf.space_code = s.space_code
+          AND sf.operation_status = 'Operational'
+    )
+
+    -- 4. No approved booking overlapping the requested period
+    AND NOT EXISTS (
+        SELECT 1
+        FROM BOOKING b
+        WHERE b.space_code = s.space_code
+          AND b.booking_status = 'Approved'
+          AND b.requested_start < @EndTime
+          AND b.requested_end >  @StartTime
+    )
+
+    -- 5. No OUT-OF-SERVICE maintenance overlapping the requested period (advisory maintenance does not block availability)
+    AND NOT EXISTS (
+        SELECT 1
+        FROM MAINTENANCERECORD m
+        WHERE m.space_code = s.space_code
+          AND m.maintenance_status IN ('Reported', 'In Progress')
+          AND m.impact_level = 'out-of-service'
+          AND m.start_time < @EndTime
+          AND ISNULL(m.completion_time, '9999-12-31') > @StartTime
+    )
+
+ORDER BY s.capacity ASC, s.space_code;
+GO
+
+PRINT '============================================================';
+PRINT 'Query 3 Execution Complete';
+PRINT '============================================================';
+GO
+
+-- ============================================================
 -- QUERY 4: APPROVED BOOKINGS AFFECTED BY MAINTENANCE ESCALATION
 -- ============================================================
 /*
