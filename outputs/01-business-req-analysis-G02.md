@@ -256,6 +256,7 @@ The cardinality and participation constraints for each relationship are justifie
 20. **Future Booking Requirement:** Users whose role is not Facility Staff or Facility Manager may only submit booking requests for future time periods.
 21. **Booking Cancellation Rule:** A booking may be cancelled only if the booking status is `Pending`, or `Approved`. Cancelled bookings shall remain stored in the system to preserve historical records and auditability.
 22. **Booking Modification Rule:** Once a booking has been approved, the requested space, requested start time, and requested end time shall not be modified. If changes to the space or booking period are required, the booking must be cancelled and a new booking request submitted for approval.
+23. **Booking Availability Rule:** Only bookings whose status is Approved or Checked In shall reserve or occupy a space and therefore block overlapping booking requests. Bookings with status Rejected, Cancelled, Completed, or No-Show shall not block new booking requests. A No-Show booking shall remain recorded as a previously approved booking for historical reporting and audit purposes but shall not participate in current availability or overlap-conflict checks.
 ---
 
 ## 8. Assumptions

@@ -5,7 +5,7 @@ This is a delta-only analysis of the Phase 2 requirements in `req/business-requi
 Baseline evidence used: `outputs/01-business-req-analysis-G02.md` (the repository's latest approved Step 1 artifact; the filename named in the workflow does not exist), `outputs/02-erd-design-G02.md`, `outputs/03-logical-design-G02.md`, `outputs/04-design-validation-G02.md`, `outputs/05-db-definition-G02.sql`, and the related approved reviews in `docs/`.
 
 Phase 1 has `MAINTENANCERECORD` with maintenance status and a timed relationship to `SPACE`, but no impact-level data. Its booking and maintenance triggers treat every active maintenance record as booking-blocking. `BOOKING` already records the requester, space, requested period, status, and optional approver/decision information. `SPACE`, `FACILITY`, and `SPACE_FACILITY` already provide the capacity and facility data needed by the room finder.
-
+**Design Assumption:** Because the Phase 2 specification does not explicitly define the detailed instant-approval eligibility policy, this project adopts a documented implementation policy to resolve the ambiguity. This policy is a project design decision rather than a requirement stated by the specification.
 # 2. Requirement Change Summary
 
 | Change ID | Phase 1 Baseline | Phase 2 Requirement | Change Type | Main Impact |
@@ -107,7 +107,6 @@ Candidate mechanisms such as transaction isolation, range/key locking, or a cent
 | --- | --- | --- | --- |
 | What defines a semester: supplied start/end parameters, a maintained academic-calendar entity, or another authoritative source? | The first two reports require a consistent semester scope. | Treat semester boundaries as report parameters until requirements authorize stored academic-calendar data. | Steps 09 and 16 |
 | For the weekday-and-hour report, does a booking count only in its requested start-hour bucket or in every hour bucket it occupies? | Different aggregation semantics yield different counts. | Do not select semantics in Step 08; obtain clarification before analytical SQL. | Step 16 |
-| Which space types and policy conditions qualify for instant approval, and must the approval path be stored? | It determines how the two approval paths are recognized and audited. | Preserve existing optional staff approver for staff decisions; do not infer a new column until Step 09 justifies it. | Steps 09 and 11 |
 | Must impact-level changes be retained as a complete history, or is a current escalation action plus immediate affected-booking result sufficient? | A historical escalation report may need who/when/old/new impact information; current state alone may be insufficient. | Step 09 must explicitly choose a representation that supports the required affected-booking use case and document any retention limit. | Steps 09, 10, and 16 |
 | Does “active advisory at booking time” include maintenance in `Reported` and `In Progress` only, as Phase 1 treated active maintenance, or another status/time definition? | It determines which advisories are disclosed and acknowledged. | Use the existing Phase 1 active statuses (`Reported`, `In Progress`) pending confirmation. | Steps 09 and 11 |
 
