@@ -15,6 +15,7 @@ Phase 1 has `MAINTENANCERECORD` with maintenance status and a timed relationship
 | C08-03 | Maintenance has a status but no impact-level transition requirement. | An open maintenance record may be escalated or downgraded; escalation must identify already-approved overlapping bookings. | New | Impact change representation, escalation workflow, and affected-booking lookup. |
 | C08-04 | Booking overlap trigger checks approved bookings, but Phase 1 has no concurrency design for simultaneous decisions. | Instant and staff approval must never produce overlapping approved bookings under concurrent operations. | Clarified | Atomic availability-and-approval decision for booking operations. |
 | C08-05 | Booking, space, facility, and maintenance history support general operational viewing only. | Implement four named analytical reports and test index effects on a large dataset. | New | Semester interpretation, report inputs, query design, data generation, and index analysis. |
+| C08-06 | Every booking requires staff review and approval. | Classroom booking requests submitted by a Lecturer or Teaching Assistant are approved automatically at submission time when availability, capacity, maintenance, and usage-policy conditions are satisfied; all other requests remain subject to staff approval. | Replaced | Resolution-path data, eligibility rules, approval workflow, concurrency handling, and test-data coverage. |
 
 # 3. Affected Actors
 
