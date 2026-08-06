@@ -27,8 +27,6 @@ This is a **phantom-insert / check-then-act race**, not a lost-update: the two t
 ### Option A: Default (Read Committed) Locking (Rejected)
 Row-level shared locks are released as soon as the availability-check read completes, before the transaction's own insert/approval commits. This does not address the main concurrency problem of to-be-inserted rows.
 
-*Note:* Step 9 (Decision 4)'s `row_version` on `BOOKING` addresses lost updates, not phantom-insert conflicts.
-
 ### Option B: Per-Space Update Locking (Strict 2PL) (Selected)
 Lock the **space**, not a time range: any operation that could result in an approved booking for a given `space_code` must acquire a transaction-held update lock on the corresponding `SPACE` row (`WITH (UPDLOCK, HOLDLOCK)`) before re-checking overlap and recording its own result. Only one transaction can hold a U lock on a given resource at a time, so a second session is forced to wait. `HOLDLOCK` keeps that lock held for the duration of the transaction rather than releasing it as soon as the read completes.
 
@@ -48,7 +46,6 @@ SQL Server has no native range-exclusion constraint. An `AFTER INSERT, UPDATE` t
 **Rationale:**
 - Directly closes the check-then-act race for all three pairings, uniformly, because the lock is keyed to the space, not to a specific query shape.
 - Correctness comes from the lock and the fresh recheck it guards.
-- `row_version` stays in place unmodified for its own, separate lost-update scenario; the two mechanisms are complementary.
 
 ---
 
