@@ -66,23 +66,23 @@ BEGIN TRY
     END;
 
     -- ------------------------------------------------------------
-    -- 2.2 Table: BOOKING (Change ID: C08-04, P2-BR-07, CC-01-03)
-    -- Add approval_path column with DEFAULT 'Staff' and CHECK constraint.
+    -- 2.2 Table: BOOKING (Change ID: C08-04, C08-06, P2-BR-07, P2-BR-10, P2-BR-11, CC-01-03)
+    -- Add resolution_path column with DEFAULT 'Staff' and CHECK constraint.
     -- Baseline backfill: Pre-existing booking records receive 'Staff'.
     -- Add row_version ROWVERSION column for optimistic concurrency support.
     -- ------------------------------------------------------------
-    IF COL_LENGTH('dbo.BOOKING', 'approval_path') IS NULL
+    IF COL_LENGTH('dbo.BOOKING', 'resolution_path') IS NULL
     BEGIN
-        PRINT 'Adding column [approval_path] to [BOOKING]...';
+        PRINT 'Adding column [resolution_path] to [BOOKING]...';
         ALTER TABLE dbo.BOOKING
-            ADD approval_path VARCHAR(20) NOT NULL 
-                CONSTRAINT DF_BOOKING_APPROVAL_PATH DEFAULT 'Staff';
+            ADD resolution_path VARCHAR(20) NOT NULL 
+                CONSTRAINT DF_BOOKING_RESOLUTION_PATH DEFAULT 'Staff';
     END;
 
-    IF OBJECT_ID('dbo.CK_BOOKING_APPROVAL_PATH', 'C') IS NULL
+    IF OBJECT_ID('dbo.CK_BOOKING_RESOLUTION_PATH', 'C') IS NULL
     BEGIN
-        PRINT 'Adding CHECK constraint [CK_BOOKING_APPROVAL_PATH] to [BOOKING]...';
-        EXEC('ALTER TABLE dbo.BOOKING ADD CONSTRAINT CK_BOOKING_APPROVAL_PATH CHECK (approval_path IN (''Instant'', ''Staff''));');
+        PRINT 'Adding CHECK constraint [CK_BOOKING_RESOLUTION_PATH] to [BOOKING]...';
+        EXEC('ALTER TABLE dbo.BOOKING ADD CONSTRAINT CK_BOOKING_RESOLUTION_PATH CHECK (resolution_path IN (''Instant'', ''Staff''));');
     END;
 
     IF COL_LENGTH('dbo.BOOKING', 'row_version') IS NULL
@@ -180,7 +180,45 @@ END CATCH;
 GO
 
 -- ============================================================
--- Section 4: Post-Migration Validation & Verification Queries
+-- Section 4: Triggers (Write-Once Constraints)
+-- ============================================================
+
+PRINT '============================================================';
+PRINT 'Creating Triggers...';
+PRINT '============================================================';
+GO
+
+IF OBJECT_ID('dbo.TR_BOOKING_RESOLUTION_PATH_IMMUTABLE', 'TR') IS NOT NULL
+    DROP TRIGGER dbo.TR_BOOKING_RESOLUTION_PATH_IMMUTABLE;
+GO
+
+CREATE TRIGGER dbo.TR_BOOKING_RESOLUTION_PATH_IMMUTABLE
+ON dbo.BOOKING
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF UPDATE(resolution_path)
+    BEGIN
+        IF EXISTS (
+            SELECT 1
+            FROM inserted i
+            JOIN deleted d ON i.booking_id = d.booking_id
+            WHERE i.resolution_path <> d.resolution_path
+        )
+        BEGIN
+            RAISERROR ('The resolution_path attribute is write-once and cannot be modified after assignment.', 16, 1);
+            ROLLBACK TRANSACTION;
+        END
+    END
+END;
+GO
+
+PRINT 'Trigger TR_BOOKING_RESOLUTION_PATH_IMMUTABLE created successfully.';
+GO
+
+-- ============================================================
+-- Section 5: Post-Migration Validation & Verification Queries
 -- ============================================================
 
 PRINT '============================================================';
@@ -188,7 +226,7 @@ PRINT 'Running Post-Migration Verification Queries...';
 PRINT '============================================================';
 GO
 
--- 4.1 Verify Column Alterations and Baseline Backfill Values
+-- 5.1 Verify Column Alterations and Baseline Backfill Values
 SELECT 
     'MAINTENANCERECORD Columns' AS verification_check,
     c.name AS column_name,
@@ -209,9 +247,9 @@ SELECT
 FROM sys.columns c
 JOIN sys.types t ON c.user_type_id = t.user_type_id
 WHERE c.object_id = OBJECT_ID('dbo.BOOKING')
-  AND c.name IN ('approval_path', 'row_version');
+  AND c.name IN ('resolution_path', 'row_version');
 
--- 4.2 Verify Created Tables Existence and Row Counts
+-- 5.2 Verify Created Tables Existence and Row Counts
 SELECT 
     'Table Existence Check' AS verification_check,
     t.name AS table_name,
@@ -219,7 +257,7 @@ SELECT
 FROM sys.tables t
 WHERE t.name IN ('BOOKING_ADVISORY_ACK', 'MAINTENANCE_IMPACT_HISTORY');
 
--- 4.3 Verify Constraints Active Status
+-- 5.3 Verify Constraints Active Status
 SELECT 
     'Active Constraints Check' AS verification_check,
     parent.name AS table_name,
@@ -230,12 +268,12 @@ FROM sys.check_constraints chk
 JOIN sys.tables parent ON chk.parent_object_id = parent.object_id
 WHERE chk.name IN (
     'CK_MAINTENANCERECORD_IMPACT_LEVEL',
-    'CK_BOOKING_APPROVAL_PATH',
+    'CK_BOOKING_RESOLUTION_PATH',
     'CK_HIST_OLD_IMPACT',
     'CK_HIST_NEW_IMPACT'
 );
 
--- 4.4 Verify Data Backfill Distribution on Pre-Existing Baseline Rows
+-- 5.4 Verify Data Backfill Distribution on Pre-Existing Baseline Rows
 IF EXISTS (SELECT 1 FROM dbo.MAINTENANCERECORD)
 BEGIN
     EXEC('SELECT ''MAINTENANCERECORD Backfill Check'' AS verification_check, impact_level, COUNT(*) AS record_count FROM dbo.MAINTENANCERECORD GROUP BY impact_level;');
@@ -243,7 +281,7 @@ END;
 
 IF EXISTS (SELECT 1 FROM dbo.BOOKING)
 BEGIN
-    EXEC('SELECT ''BOOKING Backfill Check'' AS verification_check, approval_path, COUNT(*) AS record_count FROM dbo.BOOKING GROUP BY approval_path;');
+    EXEC('SELECT ''BOOKING Backfill Check'' AS verification_check, resolution_path, COUNT(*) AS record_count FROM dbo.BOOKING GROUP BY resolution_path;');
 END;
 
 PRINT '============================================================';
