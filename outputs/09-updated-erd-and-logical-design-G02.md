@@ -11,9 +11,9 @@ The following Change Ledger is derived directly from `outputs/08-requirement-cha
 | C08-01 | §2, §4, §6 (P2-BR-01/02), §9 | `MAINTENANCERECORD` | ADD ATTRIBUTE (`impact_level` as `VARCHAR(20)` with allowed values `'advisory'` / `'out-of-service'`). |
 | C08-02 | §2, §4, §5, §6 (P2-BR-03), §9 | `BOOKING` ↔ `MAINTENANCERECORD` | ADD ENTITY (`BOOKING_ADVISORY_ACK`) + ADD RELATIONSHIPS (disclosed advisory acknowledgement at booking time). |
 | C08-03 | §2, §4, §5, §6 (P2-BR-05/06), §9, §11 | `MAINTENANCERECORD` | ADD ENTITY (`MAINTENANCE_IMPACT_HISTORY`) + ADD RELATIONSHIPS (retain impact escalation/downgrade history and change audit log). |
-| C08-04 | §2, §6, §7 (P2-BR-07, CC-01–03), §9, §11 | `BOOKING` | ADD ATTRIBUTE (`resolution_path` as `VARCHAR(20)`). CC-01–CC-03 is a cross-row phantom-overlap conflict, not a single-row update conflict; per Step 8 §9's downstream map, Step 9 retains the design facts needed by both approval paths and defers the concurrency mechanism itself to Steps 11–13. No per-row version column is added (corrected per review R09-5; see Decision 4). |
+| C08-04 | §2, §6, §7 (P2-BR-07, CC-01–03), §9, §11 | `BOOKING` | ADD ATTRIBUTE (`resolution_path` as `VARCHAR(20)`). CC-01–CC-03 is a cross-row phantom-overlap conflict, not a single-row update conflict; per Step 8 §9's downstream map, Step 9 retains the design facts needed by both approval paths and defers the concurrency mechanism itself to Steps 11–13. No per-row version column is added (corrected per review R09-5). |
 | C08-05 | §2, §6, §8 (P2-BR-08/09), §9 | None structural | NO SCHEMA CHANGE REQUIRED (query implementation, data generator, and index tuning in Steps 14–16). |
-| C08-06 | §6 (P2-BR-10/11) — *no corresponding §2 row exists in the current Step 8 document; this Change ID is assigned here to preserve traceability per this skill's Bounded Invention rule* | `BOOKING` |  ADD write-once constraint documentation for `resolution_path` (P2-BR-11). Eligibility for `'Instant'` resolution (P2-BR-10: `space_type = 'Classroom'` AND requester role AND `usage_policy` constraints satisfied) is evaluated at resolution time against existing `SPACE.space_type`, `SPACE.usage_policy`, and `USER.role` — no new column required for eligibility itself. |
+| C08-06 | §6 (P2-BR-10/11)| `BOOKING` |  ADD write-once constraint documentation for `resolution_path` (P2-BR-11). Eligibility for `'Instant'` resolution (P2-BR-10: `space_type = 'Classroom'` AND requester role AND `usage_policy` constraints satisfied) is evaluated at resolution time against existing `SPACE.space_type`, `SPACE.usage_policy`, and `USER.role` — no new column required for eligibility itself. |
 
 ---
 
@@ -41,31 +41,25 @@ In accordance with Step 8 §11 (Open Questions) and Step 9 guidelines for contro
 * **Assignment Timing (corrected per review R09-2):** `resolution_path` is evaluated and assigned exactly once, at the same transaction that inserts the `BOOKING` row: eligibility (Decision 7 / P2-BR-10) is checked at submission time, and the column is set to `'Instant'` if all conditions hold or defaults to `'Staff'` otherwise. It is never assigned or re-assigned later, including at the moment a staff decision is recorded. A full status/path/decision-field matrix is defined in §5.5 below.
 * **Traceability & Step 8 Alignment:** Aligns with Step 8 §11 Working Assumption 3 and P2-BR-07 while preserving Phase 1 staff decision auditability.
 
-### Decision 4: Concurrency-Support Schema Boundary (revised per review R09-5)
-* **Quoted Requirement (Step 8 §9 downstream map, C08-04 row):** "Retain design facts needed by both approval paths without implementing the mechanism" — Step 9 is not asked to add a concurrency-control column.
-* **Why a `row_version`/`ROWVERSION` column was removed:** Step 8 §7 defines CC-01–CC-03 as conflicts *between two different rows* being concurrently inserted/approved for the same `space_code` and overlapping period (a phantom-read/insert problem), not as two transactions concurrently updating the *same* `BOOKING` row (a lost-update problem). A per-row optimistic-concurrency token only ever detects the latter, so it provides no protection against CC-01–CC-03 and its earlier "atomic conflict detection" claim was inaccurate. No separate lost-update scenario is documented in Step 8 that would justify the column on its own.
-* **Chosen Representation:** No new column is added to `BOOKING` for concurrency in Step 9. Concurrency readiness is instead described structurally: the shared, contended resource for CC-01–CC-03 is the combination of `SPACE.space_code` and the requested time range across `BOOKING` rows for that space — this is what Steps 11–13 must protect atomically (e.g., via serializable isolation, range/key locking, or a centralized approval transaction), consistent with the "candidate mechanisms... are implementation alternatives for Steps 11-13" note in Step 8 §7.
-* **Scope Boundary Confirmation:** Step 9 makes no structural or procedural concurrency addition. The mechanism selection and implementation remain entirely in Steps 11–13 per Step 8 §9.
-
-### Decision 5: Semester Scope Representation
+### Decision 4: Semester Scope Representation
 * **Quoted Open Question (Step 8 §11 Row 1):** *"What defines a semester: supplied start/end parameters, a maintained academic-calendar entity, or another authoritative source?"*
 * **Chosen Representation:** Treat semester boundaries as report input parameters (`@semester_start DATETIME`, `@semester_end DATETIME`) in analytical queries (Reports 1 and 2), rather than introducing a stored `ACADEMIC_CALENDAR` or `SEMESTER` table into the relational schema.
 * **Rationale:** Phase 2 BRA §1.3 asks for reports "for a given semester" but does not define or require a persistent academic calendar table. Supplying date parameters avoids adding ungrounded administrative entities to the database schema while providing complete flexibility for any semester date range.
 * **Traceability & Step 8 Alignment:** Adheres directly to Step 8 §11 Working Assumption 1.
 
-### Decision 6: Active Advisory Status Scope
+### Decision 5: Active Advisory Status Scope
 * **Quoted Open Question (Step 8 §11 Row 5):** *"Does 'active advisory at booking time' include maintenance in Reported and In Progress only, as Phase 1 treated active maintenance, or another status/time definition?"*
 * **Chosen Representation:** Active advisories subject to disclosure and acknowledgement at booking time are defined as `MAINTENANCERECORD` rows where `maintenance_status IN ('Reported', 'In Progress')` AND `impact_level = 'advisory'` AND the requested booking period overlaps the maintenance period.
 * **Rationale:** Preserves consistency with Phase 1 baseline logic where active maintenance is represented by open statuses (`Reported`, `In Progress`), while filtering specifically for `impact_level = 'advisory'` per P2-BR-02/03.
 * **Traceability & Step 8 Alignment:** Adheres directly to Step 8 §11 Working Assumption 5 and P2-BR-03.
 
-### Decision 7: Resolution-Path Eligibility Basis and Write-Once Constraint
+### Decision 6: Resolution-Path Eligibility Basis and Write-Once Constraint
 * **Quoted Requirement (Step 8 §6, P2-BR-10):** *"Classroom booking requests submitted by users with the Lecturer or Teaching Assistant role must be approved automatically at submission time, provided that all applicable availability, capacity, maintenance, and usage-policy constraints are satisfied."*
 * **Quoted Requirement (Step 8 §6, P2-BR-11):** *"Once a booking's resolution path has been assigned, it must not be changed or cleared."*
 * **Chosen Representation:** `SPACE.usage_policy` is retained unchanged from the Phase 1 baseline. `resolution_path = 'Instant'` eligibility is evaluated at resolution time as the conjunction of: (1) `SPACE.space_type = 'Classroom'` for the requested space, (2) `USER.role IN ('Lecturer', 'Teaching Assistant')` for the requester, and (3) all applicable availability, capacity, maintenance, and `SPACE.usage_policy` constraints being satisfied. All three conditions are evaluated against existing Phase 1 columns; no new eligibility column is introduced. `resolution_path` itself is documented as write-once: it is evaluated and assigned exactly once, at INSERT time (see Decision 3's Assignment Timing note and §5.5), and is never altered by a subsequent UPDATE — including when a staff decision is later recorded on the same row.
 * **Rationale:** P2-BR-10 names `space_type` and `usage_policy` explicitly alongside the role condition, so all three remain load-bearing in the eligibility decision — role eligibility narrows *which* bookings can be instant-resolved, it does not substitute for the existing space-type and policy checks. Retaining `usage_policy` unchanged keeps this decision fully aligned with the literal Step 8 text.
-* **Write-once enforcement scope:** Per Step 8 §9's downstream map for this rule (Steps 9–12), Step 9's responsibility is limited to documenting the write-once requirement and shaping the schema to support it (see §5.4 below); the actual enforcement mechanism (e.g., an `INSTEAD OF UPDATE` or `AFTER UPDATE` trigger rejecting any write to `resolution_path`) is Step 10/12 scope, consistent with how Decision 4 defers concurrency mechanism choice to Steps 11–13.
-* **Traceability:** C08-06 (locally assigned — recommend the group formally add this to Step 8 §2; see §1), P2-BR-10, P2-BR-11.
+* **Write-once enforcement scope:** Per Step 8 §9's downstream map for this rule (Steps 9–12), Step 9's responsibility is limited to documenting the write-once requirement and shaping the schema to support it (see §5.4 below); the actual enforcement mechanism (e.g., an `INSTEAD OF UPDATE` or `AFTER UPDATE` trigger rejecting any write to `resolution_path`) is Step 10/12 scope
+* **Traceability:** C08-06, P2-BR-10, P2-BR-11.
 
 ---
 
@@ -315,19 +309,13 @@ Audit table recording all impact-level changes (escalations from advisory to out
 
 ---
 
-### 5.3 Concurrency Schema Note (revised per review R09-5)
-
-Step 9 adds no concurrency-control column to `BOOKING`. CC-01–CC-03 (Step 8 §7) are conflicts between different `BOOKING` rows contending for the same `SPACE.space_code` and an overlapping time range — a phantom-overlap problem, not a single-row lost-update problem — so a per-row optimistic-concurrency token (e.g., `ROWVERSION`) would not detect them and is not added. The relevant shared resource that Steps 11–13 must protect atomically is `SPACE.space_code` together with the requested time range across `BOOKING` rows for that space; no schema change is required to name that resource, since it is already expressed by the existing `BOOKING.space_code`, `requested_start`, and `requested_end` columns. Mechanism selection (transaction isolation level, range/key locking, or a centralized approval transaction) remains entirely in Steps 11–13 (Concurrency Design, Implementation, and Testing) per Step 8 §7 and §9.
-
----
-
-### 5.4 Resolution Path Write-Once Constraint Note
+### 5.3 Resolution Path Write-Once Constraint Note
 
 Per P2-BR-11 ("Once a booking's resolution path has been assigned, it must not be changed or cleared"), `BOOKING.resolution_path` is documented here as a **write-once attribute**: it receives its value exactly once, at the same transaction that inserts the booking row, and must never be altered by any later `UPDATE` for the lifetime of that row — including at the moment a staff decision is subsequently recorded on the same row (corrected per review R09-2; the earlier "or ... at the moment the decision is first recorded" alternative contradicted this and has been removed). Per Step 8 §9's downstream map, Step 9's responsibility is limited to this documentation and to shaping the schema so enforcement is possible (a single, non-nullable, defaulted column with no secondary "override" field). The actual enforcement mechanism is out of scope for Step 9 and is assigned to Step 10/12 — a `CREATE TRIGGER` on `BOOKING` rejecting any `UPDATE` that touches `resolution_path` is the recommended mechanism.
 
 ---
 
-### 5.5 Booking Resolution State Matrix (added per review R09-2)
+### 5.4 Booking Resolution State Matrix (added per review R09-2)
 
 The following matrix defines every valid combination of `resolution_path`, `booking_status`, and the staff-decision fields. It replaces the previously unstated "conditional relationships" and preserves the Phase 1 requirement that staff approval/rejection record actor, time, and note.
 
