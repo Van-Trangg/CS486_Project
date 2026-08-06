@@ -13,6 +13,7 @@ The following Change Ledger is derived directly from `outputs/08-requirement-cha
 | C08-03 | §2, §4, §5, §6 (P2-BR-05/06), §9, §11 | `MAINTENANCERECORD` | ADD ENTITY (`MAINTENANCE_IMPACT_HISTORY`) + ADD RELATIONSHIPS (retain impact escalation/downgrade history and change audit log). |
 | C08-04 | §2, §6, §7 (P2-BR-07, CC-01–03), §9, §11 | `BOOKING` | ADD ATTRIBUTES (`approval_path` as `VARCHAR(20)` and `row_version` as `ROWVERSION` for concurrency schema support only). |
 | C08-05 | §2, §6, §8 (P2-BR-08/09), §9 | None structural | NO SCHEMA CHANGE REQUIRED (query implementation, data generator, and index tuning in Steps 14–16). |
+| C08-06 | §6 (P2-BR-10/11) — *no corresponding §2 row exists in the current Step 8 document; this Change ID is assigned here to preserve traceability per this skill's Bounded Invention rule* | `BOOKING` | RENAME ATTRIBUTE (`approval_path` → `resolution_path`) + ADD write-once constraint documentation for `resolution_path` (P2-BR-11). Eligibility for `'Instant'` resolution (P2-BR-10: `space_type = 'Classroom'` AND requester role AND `usage_policy` constraints satisfied) is evaluated at resolution time against existing `SPACE.space_type`, `SPACE.usage_policy`, and `USER.role` — no new column required for eligibility itself. |
 
 ---
 
@@ -32,10 +33,11 @@ In accordance with Step 8 §11 (Open Questions) and Step 9 guidelines for contro
 * **Rationale:** A single campus space may have multiple active advisory maintenance records simultaneously (P2-BR-04). A single boolean flag or simple note on `BOOKING` cannot prove *which* specific active advisories were presented to the requester at submission time. Establishing a dedicated associative entity allows M:N linkage between bookings and active advisory records, providing an immutable audit record (`acknowledged_at`) of every advisory disclosed and accepted.
 * **Traceability & Step 8 Alignment:** Directly satisfies P2-BR-03 and Step 8 §4 candidate new entity requirements.
 
-### Decision 3: Approval Path Representation
+### Decision 3: Resolution Path Representation
 * **Quoted Open Question (Step 8 §11 Row 3):** *"Which space types and policy conditions qualify for instant approval, and must the approval path be stored?"*
-* **Chosen Representation:** Add an explicit column `approval_path VARCHAR(20) NOT NULL` to `BOOKING` with CHECK constraint `approval_path IN ('Instant', 'Staff')` (Default: `'Staff'`).
-* **Rationale:** Phase 2 BRA introduces automatic instant approval for qualifying space types alongside the existing staff approval workflow. Storing `approval_path` explicitly distinguishes instant approvals from staff decisions without introducing synthetic "system" staff accounts or relying on `approver_id IS NULL` (which would be ambiguous with pending requests). For `'Instant'` approvals, `approver_id` remains NULL; for `'Staff'` approvals, `approver_id` records the approving staff member's `user_id`.
+* **Chosen Representation:** Add an explicit column `resolution_path VARCHAR(20) NOT NULL` to `BOOKING` with CHECK constraint `resolution_path IN ('Instant', 'Staff')` (Default: `'Staff'`).
+* **Rationale:** Phase 2 BRA introduces automatic instant approval for qualifying requests alongside the existing staff approval workflow. Storing `resolution_path` explicitly distinguishes instant approvals from staff decisions without introducing synthetic "system" staff accounts or relying on `approver_id IS NULL` (which would be ambiguous with pending requests). For `'Instant'` resolutions, `approver_id` remains NULL; for `'Staff'` resolutions, `approver_id` records the approving staff member's `user_id`.
+* **Naming Update (C08-06 / P2-BR-10, P2-BR-11):** Renamed from `approval_path` to `resolution_path` to reduce ambiguity between "the path a request takes" and "an approval decision," since Phase 2 now also formally governs rejection/immutability behavior for this same attribute (see Decision 7).
 * **Traceability & Step 8 Alignment:** Aligns with Step 8 §11 Working Assumption 3 and P2-BR-07 while preserving Phase 1 staff decision auditability.
 
 ### Decision 4: Concurrency-Support Schema Boundary
@@ -55,6 +57,14 @@ In accordance with Step 8 §11 (Open Questions) and Step 9 guidelines for contro
 * **Chosen Representation:** Active advisories subject to disclosure and acknowledgement at booking time are defined as `MAINTENANCERECORD` rows where `maintenance_status IN ('Reported', 'In Progress')` AND `impact_level = 'advisory'` AND the requested booking period overlaps the maintenance period.
 * **Rationale:** Preserves consistency with Phase 1 baseline logic where active maintenance is represented by open statuses (`Reported`, `In Progress`), while filtering specifically for `impact_level = 'advisory'` per P2-BR-02/03.
 * **Traceability & Step 8 Alignment:** Adheres directly to Step 8 §11 Working Assumption 5 and P2-BR-03.
+
+### Decision 7: Resolution-Path Eligibility Basis and Write-Once Constraint
+* **Quoted Requirement (Step 8 §6, P2-BR-10):** *"Classroom booking requests submitted by users with the Lecturer or Teaching Assistant role must be approved automatically at submission time, provided that all applicable availability, capacity, maintenance, and usage-policy constraints are satisfied."*
+* **Quoted Requirement (Step 8 §6, P2-BR-11):** *"Once a booking's resolution path has been assigned, it must not be changed or cleared."*
+* **Chosen Representation:** `SPACE.usage_policy` is retained unchanged from the Phase 1 baseline. `resolution_path = 'Instant'` eligibility is evaluated at resolution time as the conjunction of: (1) `SPACE.space_type = 'Classroom'` for the requested space, (2) `USER.role IN ('Lecturer', 'Teaching Assistant')` for the requester, and (3) all applicable availability, capacity, maintenance, and `SPACE.usage_policy` constraints being satisfied. All three conditions are evaluated against existing Phase 1 columns; no new eligibility column is introduced. `resolution_path` itself is documented as write-once: valid only at INSERT time (or at the moment a staff decision is first recorded), never altered by a subsequent UPDATE.
+* **Rationale:** P2-BR-10 names `space_type` and `usage_policy` explicitly alongside the role condition, so all three remain load-bearing in the eligibility decision — role eligibility narrows *which* bookings can be instant-resolved, it does not substitute for the existing space-type and policy checks. Retaining `usage_policy` unchanged keeps this decision fully aligned with the literal Step 8 text.
+* **Write-once enforcement scope:** Per Step 8 §9's downstream map for this rule (Steps 9–12), Step 9's responsibility is limited to documenting the write-once requirement and shaping the schema to support it (see §5.4 below); the actual enforcement mechanism (e.g., an `INSTEAD OF UPDATE` or `AFTER UPDATE` trigger rejecting any write to `resolution_path`) is Step 10/12 scope, consistent with how Decision 4 defers concurrency mechanism choice to Steps 11–13.
+* **Traceability:** C08-06 (locally assigned — recommend the group formally add this to Step 8 §2; see §1), P2-BR-10, P2-BR-11.
 
 ---
 
@@ -94,7 +104,7 @@ erDiagram
         NVARCHAR(MAX) facility_description
     }
 
-    %% C08-04 — BOOKING (Updated with approval_path and row_version)
+    %% C08-04, C08-06 — BOOKING (Updated with resolution_path and row_version)
     BOOKING {
         INT booking_id PK
         VARCHAR(50) space_code FK
@@ -109,7 +119,7 @@ erDiagram
         DATETIME decision_time
         NVARCHAR(MAX) decision_note
         VARCHAR(255) rejection_reason
-        VARCHAR(20) approval_path
+        VARCHAR(20) resolution_path
         ROWVERSION row_version
     }
 
@@ -217,7 +227,7 @@ erDiagram
 ### 5.1 Modified Tables
 
 #### 5.1.1 Table: BOOKING (Modified)
-Represents space reservation requests. Extended in Phase 2 with approval path classification and automatic concurrency row versioning.
+Represents space reservation requests. Extended in Phase 2 with resolution path classification and automatic concurrency row versioning.
 
 | Column Name | SQL Server Data Type | Nullability | Key | Constraints | Description | Change |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -234,7 +244,7 @@ Represents space reservation requests. Extended in Phase 2 with approval path cl
 | `decision_time` | `DATETIME` | NULL | - | - | Time decision was recorded. Nullable. | — |
 | `decision_note` | `NVARCHAR(MAX)` | NULL | - | - | Staff review notes. Nullable. | — |
 | `rejection_reason` | `VARCHAR(255)` | NULL | - | CHECK | Explanation of rejection (mandatory if status is Rejected). | — |
-| `approval_path` | `VARCHAR(20)` | NOT NULL | - | DEFAULT 'Staff', CHECK | Indicates approval workflow path (`'Instant'` or `'Staff'`). | NEW (C08-04, Res. #3) |
+| `resolution_path` | `VARCHAR(20)` | NOT NULL | - | DEFAULT 'Staff', CHECK, WRITE-ONCE (see §5.4) | Indicates resolution workflow path (`'Instant'` or `'Staff'`). Set once at INSERT; never updated thereafter. | RENAMED from `approval_path` (C08-06, Res. #3/#7) |
 | `row_version` | `ROWVERSION` | NOT NULL | - | - | SQL Server concurrency token for optimistic locking checks. | NEW (C08-04, Res. #4) |
 
 #### 5.1.2 Table: MAINTENANCERECORD (Modified)
@@ -294,7 +304,13 @@ Audit table recording all impact-level changes (escalations from advisory to out
 
 ### 5.3 Concurrency Schema Note
 
-This logical design introduces structural schema columns (`BOOKING.row_version` and `BOOKING.approval_path`) to enable atomic conflict detection across instant and staff approval paths. In accordance with Step 8 §9 (C08-04) and Phase 2 workflow rules, this step defines **schema support only**. No transaction isolation levels, row locking hints, triggers, or procedural concurrency control mechanisms are implemented in Step 9; those are strictly scoped to Steps 11–13 (Concurrency Design, Implementation, and Testing).
+This logical design introduces structural schema columns (`BOOKING.row_version` and `BOOKING.resolution_path`) to enable atomic conflict detection across instant and staff resolution paths. In accordance with Step 8 §9 (C08-04) and Phase 2 workflow rules, this step defines **schema support only**. No transaction isolation levels, row locking hints, triggers, or procedural concurrency control mechanisms are implemented in Step 9; those are strictly scoped to Steps 11–13 (Concurrency Design, Implementation, and Testing).
+
+---
+
+### 5.4 Resolution Path Write-Once Constraint Note
+
+Per P2-BR-11 ("Once a booking's resolution path has been assigned, it must not be changed or cleared"), `BOOKING.resolution_path` is documented here as a **write-once attribute**: it receives its value once, at the same transaction that inserts the booking row (or, for staff-approved bookings, at the moment the decision is first recorded), and must never be altered by any later `UPDATE` for the lifetime of that row. Per Step 8 §9's downstream map, Step 9's responsibility is limited to this documentation and to shaping the schema so enforcement is possible (a single, non-nullable, defaulted column with no secondary "override" field). The actual enforcement mechanism is out of scope for Step 9 and is assigned to Step 10/12 — a `CREATE TRIGGER` on `BOOKING` rejecting any `UPDATE` that touches `resolution_path` is the recommended mechanism, consistent with how row-level concurrency enforcement (Decision 4) is likewise deferred rather than implemented here.
 
 ---
 
@@ -305,7 +321,7 @@ The following tables trace every new or modified attribute back to its governing
 ### Entity: BOOKING (Modified)
 | Attribute | Data Type | Source / Traceability | Purpose |
 |---|---|---|---|
-| `approval_path` | `VARCHAR(20)` | Change ID C08-04, Step 8 §6 (P2-BR-07), Stage 1 Decision #3 | Distinguishes `'Instant'` approval from `'Staff'` approval. |
+| `resolution_path` | `VARCHAR(20)` | Change ID C08-06, Step 8 §6 (P2-BR-10/11), Stage 1 Decision #3, #7 | Distinguishes `'Instant'` resolution from `'Staff'` resolution; write-once per P2-BR-11. |
 | `row_version` | `ROWVERSION` | Change ID C08-04, Step 8 §7 (CC-01–03), Stage 1 Decision #4 | Provides automatic version tracking for optimistic concurrency control. |
 
 ### Entity: MAINTENANCERECORD (Modified)
