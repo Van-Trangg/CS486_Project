@@ -36,7 +36,7 @@ Read Step 8 §2 (Requirement Change Summary), §4 (Affected Entities), §5 (Affe
 | Change ID | Source Step 8 Section | Affected Element | Required Schema Action |
 |---|---|---|---|
 
-> **This table must be derived from the actual `outputs/08-requirement-change-analysis-G02.md` document, not copied from memory or from any example.** The row content below illustrates the *expected shape* of a plausible Change Ledger for this project (five change areas covering impact levels, acknowledgement, escalation, concurrency-support, and reporting) — it is a worked example of the pattern, not a literal answer key. The agent must read Step 8's actual Change IDs, section citations, and required actions and populate the table from that source. If the real Step 8 document's Change IDs, count, or content differ from the illustration below, the real document governs.
+> **This table must be derived from the actual `outputs/08-requirement-change-analysis-G02.md` document, not copied from memory or from any example.** The row content below illustrates the *expected shape* of a Change Ledger — it is a worked example of the pattern, not a literal answer key, and its count of change areas is illustrative only. The agent must read Step 8's actual Change IDs, section citations, and required actions and populate the table from that source, including every change area Step 8 defines even if it is not represented below. If the real Step 8 document's Change IDs, count, or content differ from the illustration below, the real document governs.
 >
 > Illustrative example:
 >
@@ -45,8 +45,9 @@ Read Step 8 §2 (Requirement Change Summary), §4 (Affected Entities), §5 (Affe
 > | C08-01 | §2, §4, §6 (P2-BR-01/02) | `MAINTENANCERECORD` | ADD ATTRIBUTE (impact level) |
 > | C08-02 | §2, §4, §5, §6 (P2-BR-03) | `BOOKING` ↔ `MAINTENANCERECORD` | ADD ENTITY + ADD RELATIONSHIP (disclosure/acknowledgement) |
 > | C08-03 | §2, §4, §5, §6 (P2-BR-05/06) | `MAINTENANCERECORD` | ADD ATTRIBUTE and/or ADD ENTITY (escalation representation — open question, resolve in Stage 1) |
-> | C08-04 | §2, §6, §7 (P2-BR-07, CC-01–03) | `BOOKING` | ADD ATTRIBUTE (concurrency-support column only; no mechanism) |
+> | C08-04 | §2, §6, §7 (P2-BR-07, CC-01–03) | `BOOKING` | ADD ATTRIBUTE (resolution-path column carried over from the Stage 1 resolution-path decision; no separate version/rowversion column — see Stage 1 item 4) |
 > | C08-05 | §2, §6, §8 (P2-BR-08/09) | none structural | NO SCHEMA CHANGE (query/index work, Steps 14–16) |
+> | C08-06 | §6 (P2-BR-10/11) | `BOOKING` | ADD write-once constraint documentation for the resolution-path column; eligibility is evaluated against existing columns, no new eligibility column |
 
 Any Step 8 Change ID with no corresponding row is an omission and must be corrected before proceeding.
 
@@ -62,10 +63,11 @@ For every row in Step 8 §11 (Open Questions) whose "Affected Later Step" includ
 At minimum, the agent must resolve:
 1. **Escalation/downgrade representation** (Step 8 open question row 4): does the schema retain full impact-change history, or only current impact level plus an on-demand affected-bookings query? State the choice and why it is sufficient for the required "approved bookings affected by escalation" report (Step 8 §8).
 2. **Advisory acknowledgement representation** (Step 8 §4, "Candidate new entity"): the exact entity/attribute shape needed to record which specific advisories were disclosed to which booking, and when.
-3. **Approval path representation** (Step 8 open question row 3): whether instant vs. staff approval is stored as an explicit column, and if so, its name, type, and allowed values — without inventing a new actor.
-4. **Concurrency-support schema decision** (C08-04): what column(s), if any, are added now to support the Step 11–13 mechanism (e.g., a version/rowversion column), explicitly scoped as "schema support only, not implementation" per Step 8 §9's C08-04 row.
+3. **Resolution path representation** (Step 8 open question row 3): whether instant vs. staff approval is stored as an explicit column, and if so, its name, type, and allowed values — without inventing a new actor. **Name this column `resolution_path`, not `approval_path`** — Step 8 §6 (P2-BR-10/11) governs the same column for eligibility and immutability, and "approval path" is ambiguous between "the path a request takes" and "an approval decision." If a prior draft used `approval_path`, the rename must be stated as its own decision with rationale, not applied silently.
+4. **Concurrency-support schema decision** (C08-04): confirm what design facts C08-04 actually needs, and check first whether the resolution-path column from item 3 already supplies them before adding anything else. **Do not add a per-row version/rowversion/lock column or any other new concurrency-support column unless Step 8 explicitly requires one that resolution_path does not already cover.** Step 8 §9's C08-04 row assigns the atomic-protection *mechanism* to Steps 11–13; Step 9's job is limited to retaining the facts those steps will need (e.g., which path a booking took), not to pre-building mechanism scaffolding. If no additional column is needed, say so explicitly in the ledger and in §5.3 rather than leaving C08-04 unaddressed.
+5. **Resolution-path eligibility and write-once basis** (Step 8 §6, P2-BR-10/11 — this is C08-06, not an extension of item 3 to skip): state the eligibility conjunction (space type, requester role, and any other Step 8-named condition) entirely in terms of existing baseline columns, with no new eligibility column; and state, as its own explicit rule, that the resolution-path column is write-once — assigned exactly once, at the same transaction that inserts the row, and never reassigned afterward, including at the moment a later staff decision is recorded on that same row. If the resolution-path column has other fields whose validity depends on it (e.g. approver, decision time, rejection reason), produce an explicit state matrix enumerating every valid combination — see Stage 7 item 4 and the Output Format §5.3–§5.4 shape.
 
-Any structural element introduced in Stage 3 onward that is **not** traceable to either a Step 8 Change ID or a Stage 1 resolution is an invention violation and must be removed.
+Any structural element introduced in Stage 3 onward that is **not** traceable to either a Step 8 Change ID or a Stage 1 resolution is an invention violation and must be removed. A version/rowversion column added "to be safe" for concurrency, without a Step 8 citation requiring it, is exactly this kind of invention violation.
 
 ### Stage 2 — Baseline Preservation Check
 Before modifying anything, diff the Phase 1 ERD (`02-erd-design-G02.md`) and Phase 1 logical design (`03-logical-design-G02.md`) entity-by-entity and table-by-table against the Change Ledger. Confirm:
@@ -83,7 +85,8 @@ Starting from the Phase 1 entity set, apply changes only where the Change Ledger
 For each affected entity in the Change Ledger, add or modify only the attributes required:
 - `MAINTENANCERECORD`: add an impact-level attribute (exact allowed values per Phase 2 BRA §1.1 — `advisory` / `out-of-service`; verify exact casing/wording against the BRA text, do not paraphrase the value).
 - Any new acknowledgement/history entity: attributes must be minimal and auditable — at minimum a reference to the booking, a reference to the maintenance record, and a timestamp; add further attributes only if a Stage 1 resolution justifies them.
-- `BOOKING`: add the concurrency-support attribute decided in Stage 1, if any.
+- **Invariant documentation for new audit/history entities:** every new entity whose purpose is to log or disclose an event (an acknowledgement table, an impact-change history table, or similar) must carry an explicit invariants note in the logical schema (Stage 7, alongside the table spec) covering, at minimum: applicability (when a row is valid to write), completeness (whether the requirement is "at least one," "exactly one," or "one per applicable item," and what enforces that), immutability (whether rows may be updated/deleted after creation), and — for any table recording a *transition* (old value → new value) — chain continuity (each new row's "old" value must match the prior row's "new" value), atomicity with the state it logs, and tie-breaking for same-timestamp rows. State plainly that these invariants are documentation only and that their enforcement mechanism (`CHECK` constraints, triggers) is Step 10/12 scope — Step 9 states the rule so it isn't guessed downstream, it does not implement it.
+- `BOOKING`: add the resolution-path attribute decided in Stage 1 item 3, and no separate concurrency-support attribute unless Stage 1 item 4 concluded one was independently required.
 - Preserve every existing attribute of affected entities exactly as in the Phase 1 baseline; only the specific new/changed attribute is touched.
 - **Type verbatim rule:** new attribute types must be written in explicit SQL-style types (e.g., `VARCHAR(20)`, `DATETIME`), never generic aliases. Scan every new/changed attribute line against this known-bad-patterns table before finalizing:
 
@@ -139,20 +142,27 @@ Using the same table-specification format as `03-logical-design-G02.md` (Column 
 1. **Modified table specs** — only the full spec for tables that gained or changed a column (e.g., `MAINTENANCERECORD`, `BOOKING`), with new/changed rows visually distinguishable from carried-forward rows (e.g., a "Change" column marked `NEW` or `—`).
 2. **New table specs** — full spec for any new entity/table from Stage 3, in the same format.
 3. Do **not** produce full `ALTER TABLE`/`CREATE TABLE` DDL — that is Step 10's responsibility. This stage documents the logical shape only (columns, types, keys, constraints described in prose/table form), consistent with how `03-logical-design-G02.md` itself separates logical design (§1–2) from DDL specifics.
-4. State explicitly, for concurrency: this stage adds only the schema column(s) needed to support future concurrency control (per Stage 1 resolution #4); it does not choose or implement the concurrency mechanism itself (that is Steps 11–13, per Step 8 §9's C08-04 row).
+4. State explicitly, for concurrency: this stage relies on the resolution-path column (or, only if Stage 1 item 4 concluded it was independently necessary, an additional named column) to supply the design facts needed by Steps 11–13; it does not add a version/rowversion column by default, and it does not choose or implement the concurrency mechanism itself (that is Steps 11–13, per Step 8 §9's C08-04 row).
+5. Document the resolution-path column as write-once, per Stage 1 item 5: it is set once at INSERT and never updated, including when a later staff decision is recorded. If the resolution-path column co-varies with other columns on the same table (status, approver, decision fields), produce an explicit state matrix — one row per valid combination — and state that any combination not listed is invalid. Mark both the write-once rule and the state matrix as documentation only; enforcement (a rejecting trigger, spanning `CHECK` constraints) is Step 10/12 scope.
+6. For every new audit/history table from Stage 4, include its invariants note (applicability, completeness, immutability, and — where applicable — chain continuity/atomicity/tie-breaking) directly beneath that table's spec.
 
 ### Stage 8 — Self-Consistency Pre-Check
 Before writing final output, confirm each item:
 
 ```
-[ ] Every Step 8 Change ID (C08-01 through C08-05) is addressed somewhere in the ledger and, where structural, in the ERD/schema
+[ ] Every Step 8 Change ID (all IDs actually present in §2 of Step 8, not assumed from any example) is addressed somewhere in the ledger and, where structural, in the ERD/schema
 [ ] Every Step 8 §11 open question assigned to Step 9 has an explicit, rationale-backed resolution
 [ ] Every new entity/attribute/relationship traces to either a Change ID or a Stage 1 resolution — none is unexplained
 [ ] Every unaffected Phase 1 entity, attribute, and relationship is reproduced identically (no accidental edits)
 [ ] New attribute types are SQL-style verbatim, not generic aliases
 [ ] (0,1) vs (1,1) tokens double-checked for every new/changed relationship
 [ ] Concurrency section adds schema support only — no mechanism, no isolation level, no locking strategy proposed
-[ ] No entity or table from Phase 1 is removed or renamed
+[ ] No version/rowversion/lock column was added for concurrency support unless Step 8 explicitly requires one beyond the resolution-path column
+[ ] The resolution-path (or equivalently named) column is documented as write-once, assigned only at INSERT
+[ ] If the resolution-path column co-varies with status/approver/decision fields, a state matrix of valid combinations is present and exhaustive
+[ ] Every new audit/history table carries an invariants note (applicability, completeness, immutability, and chain continuity/atomicity/tie-breaking where applicable), scoped as documentation only
+[ ] Any rename of a Phase 1 baseline column (e.g. an existing `approval_path`-style column) is documented as its own decision with rationale — never applied silently
+[ ] No entity or table from Phase 1 is removed; no baseline column is renamed without a documented decision
 ```
 
 If any check fails, correct before writing output.
@@ -195,10 +205,13 @@ If any check fails, correct before writing output.
 <Full spec, Step 3-style table, for each changed table>
 
 ### 5.2 New Tables
-<Full spec, Step 3-style table, for each new table>
+<Full spec, Step 3-style table, for each new table. Directly beneath each new audit/history table's spec, include its Invariants note (applicability, completeness, immutability, and — for transition-logging tables — chain continuity, atomicity, and tie-breaking), explicitly marked as documentation only with enforcement deferred to Step 10/12.>
 
-### 5.3 Concurrency Schema Note
-<Short statement of what column(s) were added and why, with explicit scope boundary against Steps 11–13>
+### 5.3 Resolution Path Write-Once Constraint Note
+<State that the resolution-path column is assigned exactly once, at INSERT, and never updated thereafter — including when a later staff decision is recorded on the same row. State the recommended enforcement mechanism (e.g. a rejecting trigger) as a Step 10/12 pointer, not something Step 9 implements. If concurrency (C08-04) relies on this same column rather than a new one, say so here explicitly.>
+
+### 5.4 Booking Resolution State Matrix
+<Only required if the resolution-path column co-varies with other columns (status, approver, decision fields, rejection reason). One row per valid combination; state that any combination not listed is invalid. Omit this subsection with a one-line note if no such co-variance exists.>
 
 ---
 
@@ -223,6 +236,10 @@ These rules are absolute and override any other instruction:
 4. **Cardinality fidelity rule (inherited).** Mermaid tokens for any new or modified relationship must exactly reflect the cardinality reasoning derived from Step 8 §5 and the Stage 1 resolutions. Do not infer or default to symmetry.
 
 5. **No silent history decisions.** If Stage 1 resolves to *not* retaining full escalation history, this must be stated explicitly as a decision with rationale, not omitted by default.
+
+6. **No silent renames.** Renaming a Phase 1 baseline column or entity (e.g., adopting `resolution_path` where an earlier draft used `approval_path`) is only permitted when the rename itself is documented as a Stage 1 decision with rationale. A rename that appears in the schema without a corresponding decision entry is a baseline-fidelity violation, not a cosmetic change.
+
+7. **No default concurrency invention.** C08-04 (or its project-specific equivalent) is satisfied by retaining existing design facts (typically the resolution-path column) unless Step 8 explicitly names an additional column. Adding a version/rowversion/lock column by default, "to be safe," is an invention violation under Rule 2 above, not a reasonable extra precaution.
 
 ---
 

@@ -33,12 +33,12 @@ Execute each check in order. For each check, produce a result of PASS, WARN, or 
 
 ### Check 1 — Change Ledger Completeness
 **Procedure:**
-1. List every Change ID from Step 8 §2 (C08-01 through C08-05).
+1. List every Change ID actually present in Step 8 §2 — read the count and IDs from the document itself; do not assume it stops at C08-05 (this project's Step 8 defines six, C08-01 through C08-06, and future revisions may define a different count again).
 2. For each, confirm the Step 9 output's Change Scope Summary (§1) contains a corresponding row.
-3. For each structural Change ID (C08-01, C08-02, C08-03, C08-04), confirm the required schema action actually appears in the updated ERD/schema (§3/§5) — not just named in the ledger.
-4. Confirm C08-05 is correctly marked as no schema change (it is query/index scope for later steps), and that the Step 9 output does not fabricate unnecessary schema changes for it.
+3. For each structural Change ID, confirm the required schema action actually appears in the updated ERD/schema (§3/§5) — not just named in the ledger. For C08-04 specifically, confirm the "required schema action" is limited to the resolution-path column (or another column Step 8 explicitly names) and does not include an unrequested version/rowversion/lock column — see Check 10 for the full bounded-invention treatment of this case.
+4. Confirm any Change ID marked as having no independent structural action (e.g., a reporting/index-only change, or a change like C08-06 that adds constraint documentation to an existing column rather than a new one) is correctly marked as such, and that the Step 9 output does not fabricate unnecessary schema changes for it.
 
-**Pass condition:** All 5 Change IDs are present in the ledger, and all structurally-required ones are visibly implemented in the diagram/schema.
+**Pass condition:** Every Change ID from the actual Step 8 §2 is present in the ledger, and all structurally-required ones are visibly implemented in the diagram/schema with no fabricated extras.
 
 ---
 
@@ -48,7 +48,7 @@ Execute each check in order. For each check, produce a result of PASS, WARN, or 
 2. For each, confirm §2 of the Step 9 output (Design Decisions and Open-Question Resolutions) contains an explicit resolution: chosen representation + rationale + traceability to a Step 8 rule/conflict.
 3. Flag any open question left unresolved, resolved only implicitly (e.g., a column appears with no accompanying rationale), or resolved in a way that contradicts the Step 8 "Working Assumption" without saying so.
 
-**Pass condition:** All Step-9-assigned open questions have an explicit, rationale-backed resolution. An unresolved or silently-assumed open question is a FAIL, not a WARN — this is the Step 9 equivalent of an omission.
+**Pass condition:** All Step-9-assigned open questions have an explicit, rationale-backed resolution. An unresolved or silently-assumed open question is a FAIL, not a WARN — this is the Step 9 equivalent of an omission. If a resolution renames a column relative to any prior draft available for comparison (e.g. `approval_path` → `resolution_path`), the rename itself must appear as part of the stated resolution/rationale, not as a silent side effect — an undocumented rename is a FAIL under this check.
 
 ---
 
@@ -189,6 +189,39 @@ Additionally, for Step 9 specifically:
 4. Flag any new/changed attribute missing from §6, any §6 row citing a Change ID/resolution that does not actually justify that attribute, and any §6 row present for an attribute that was NOT actually changed (a stale or fabricated traceability entry).
 
 **Pass condition:** §6 exists, covers every new/changed attribute with no omissions, and every citation in it is verifiably correct against the Change Ledger or Stage 1 resolutions — not just present, but accurate.
+
+---
+
+### Check 10 — Concurrency Bounded-Invention Check (C08-04 or equivalent)
+**Procedure:**
+1. Identify the Change ID governing atomic/concurrent-approval protection (this project's C08-04).
+2. Confirm its "Required Schema Action" is satisfied using the resolution-path column (or another column Step 8 explicitly names for this purpose) and does **not** introduce a version, rowversion, lock, or similarly-purposed column that Step 8 does not name.
+3. If such a column is present, confirm it traces to an explicit Step 8 citation. If it traces only to "supporting future concurrency control" in the abstract, with no Step 8 line requiring it, this is an invention violation specific to concurrency scope-creep — flag it even if Check 4's general bounded-invention scan did not.
+
+**Pass condition:** No concurrency-support column exists beyond what Step 8 explicitly names. A version/rowversion/lock column added "to be safe" is a FAIL, not a WARN — Step 8 §9 assigns the concurrency mechanism itself to Steps 11–13, and Step 9 pre-building mechanism scaffolding is out of scope regardless of how reasonable it looks.
+
+---
+
+### Check 11 — Write-Once and State-Matrix Consistency
+**Procedure:**
+1. Identify any column the Step 9 output documents as write-once (e.g., a resolution-path column governed by an "assigned once, never updated" rule).
+2. Confirm the write-once rule is stated unconditionally — no "unless a decision is later recorded" or similar carve-out. A write-once rule with an exception is not a write-once rule.
+3. If that column co-varies with other columns on the same table (status, approver/decision fields, rejection reason), confirm a state matrix (or equivalent enumeration) exists listing every valid combination, with an explicit statement that unlisted combinations are invalid.
+4. Cross-check the state matrix against every `CHECK`-style constraint stated elsewhere in the same table's spec (§5.1/§5.2) — a matrix row that contradicts a constraint stated elsewhere in the document is a FAIL.
+5. Confirm both the write-once rule and the state matrix are explicitly scoped as documentation only, with enforcement (trigger, spanning `CHECK` constraint) assigned to Step 10/12 — Step 9 asserting it will itself enforce the rule is a scope violation.
+
+**Pass condition:** The write-once rule is unconditional and internally consistent with the state matrix, the state matrix (where required) is present and exhaustive, and both are correctly scoped as Step 9 documentation with Step 10/12 enforcement.
+
+---
+
+### Check 12 — New-Table Invariant Documentation
+**Procedure:**
+1. For every new entity/table introduced by the Change Ledger whose purpose is to log or disclose an event (an acknowledgement table, an impact-change history table, or similar), confirm its spec (§5.2) is accompanied by an explicit invariants note.
+2. Confirm the note covers, at minimum: applicability (when a row may validly be written), completeness (whether the requirement is "at least one," "exactly one," or "one per applicable item," and what mechanism is responsible for it), and immutability (whether rows may be updated or deleted after creation).
+3. For any table logging a transition (an old value moving to a new value), additionally confirm chain continuity (each row's "old" value matches the prior row's "new" value for that same parent record), atomicity with the state it logs, and tie-breaking guidance for same-timestamp rows.
+4. Confirm the note is scoped as documentation only, with enforcement mechanisms assigned to Step 10/12.
+
+**Pass condition:** Every new logging/disclosure table has a complete invariants note meeting the above minimums, correctly scoped. A new audit table with no invariants note, or with an invariants note that asserts Step 9 itself will enforce the rule, is a FAIL.
 
 ---
 
