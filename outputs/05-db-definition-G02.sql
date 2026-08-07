@@ -77,6 +77,8 @@ CREATE TABLE SPACE (
 
     CONSTRAINT PK_SPACE
         PRIMARY KEY (space_code),
+    CONSTRAINT UQ_SPACE_LOCATION
+        UNIQUE (building, floor, room_number),
     CONSTRAINT CK_SPACE_TYPE
         CHECK (space_type IN ('Auditorium', 'Classroom', 'Computer Laboratory', 'Project Laboratory', 'Meeting Room', 'Student Workspace')),
     CONSTRAINT CK_SPACE_CAPACITY

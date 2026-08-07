@@ -48,6 +48,8 @@ Represents a physical room managed by the School of Computer Science.
 | `current_status` | `VARCHAR(20)` | NOT NULL | - | CHECK | Current space status constraint (Available, In Use, etc.). |
 | `usage_policy` | `NVARCHAR(MAX)` | NOT NULL | - | - | Policy rules and priority guidelines for this space. |
 
+*Table-level constraint:* the physical-location triple `(building, floor, room_number)` is unique (`UQ_SPACE_LOCATION`) — no two rooms may share the same building, floor, and room number. This makes the location triple an alternate candidate key alongside the surrogate `space_code`.
+
 ### 2.3. Table: FACILITY
 A master catalog of equipment or items that can be equipped inside campus spaces.
 
@@ -145,6 +147,8 @@ ALTER TABLE SPACE ADD CONSTRAINT CK_SPACE_CAPACITY CHECK (capacity > 0);
 ALTER TABLE SPACE ADD CONSTRAINT CK_SPACE_CURRENT_STATUS CHECK (
     current_status IN ('Available', 'In Use', 'Under Maintenance', 'Temporarily Closed', 'Retired')
 );
+
+ALTER TABLE SPACE ADD CONSTRAINT UQ_SPACE_LOCATION UNIQUE (building, floor, room_number);
 
 -- 3. FACILITY Table Constraints
 ALTER TABLE FACILITY ADD CONSTRAINT UQ_FACILITY_NAME UNIQUE (facility_name);
@@ -489,9 +493,9 @@ This matrix traces each mapped table, column, and constraint back to its source 
 | `SPACE` | `space_code` | `SPACE.space_code` | §4.2, §3.2 | Primary Key. Room identifier. |
 | `SPACE` | `space_name` | `SPACE.space_name` | §4.2, §3.2 | Mandatory friendly name. |
 | `SPACE` | `space_type` | `SPACE.space_type` | §4.2, §3.2 | CHECK constraint checks space types. |
-| `SPACE` | `building` | `SPACE.building` | §4.2, §3.2 | Room location attribute. |
-| `SPACE` | `floor` | `SPACE.floor` | §4.2, §3.2 | Room location attribute. |
-| `SPACE` | `room_number` | `SPACE.room_number` | §4.2, §3.2 | Room location attribute. |
+| `SPACE` | `building` | `SPACE.building` | §4.2, §3.2 | Room location attribute. Part of table-level UNIQUE `UQ_SPACE_LOCATION` `(building, floor, room_number)`. |
+| `SPACE` | `floor` | `SPACE.floor` | §4.2, §3.2 | Room location attribute. Part of table-level UNIQUE `UQ_SPACE_LOCATION` `(building, floor, room_number)`. |
+| `SPACE` | `room_number` | `SPACE.room_number` | §4.2, §3.2 | Room location attribute. Part of table-level UNIQUE `UQ_SPACE_LOCATION` `(building, floor, room_number)`. |
 | `SPACE` | `capacity` | `SPACE.capacity` | §4.2, §3.2 | CHECK constraint enforces capacity > 0. |
 | `SPACE` | `current_status` | `SPACE.current_status` | §4.2, §3.2 | CHECK constraint checks current status. |
 | `SPACE` | `usage_policy` | `SPACE.usage_policy` | §4.2, §3.2 | Policies text. |
