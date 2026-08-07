@@ -211,6 +211,25 @@ GO
 PRINT 'Trigger TR_BOOKING_RESOLUTION_PATH_IMMUTABLE created successfully.';
 GO
 
+-- 4.2 Drop obsolete Phase 1 trigger TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP (C08-01, P2-BR-06)
+-- In Phase 2, maintenance creation/escalation must not be blocked by pre-existing approved bookings.
+-- Overlapping approved bookings are identified via Report Query 4 for staff follow-up.
+IF OBJECT_ID('dbo.TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP', 'TR') IS NOT NULL
+BEGIN
+    DROP TRIGGER dbo.TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP;
+    PRINT 'Obsolete Phase 1 trigger [TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP] dropped successfully.';
+END;
+GO
+
+-- ------------------------------------------------------------
+-- Note on Concurrency & Stored Procedures Workflow (C08-04, C08-06, Step 11/12):
+-- Per the project workflow rules, Step 10 focuses exclusively on DDL Schema Migration.
+-- Transactional stored procedures, including dbo.sp_ApproveBooking (which implements
+-- atomic instant auto-approval for Lecturers/TAs and staff approvals under strict 2PL)
+-- and dbo.sp_EscalateMaintenanceImpact, are implemented in outputs/12-concurrency-implementation-G02.sql.
+-- ------------------------------------------------------------
+GO
+
 -- ============================================================
 -- Section 5: Post-Migration Validation & Verification Queries
 -- ============================================================

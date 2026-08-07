@@ -289,8 +289,8 @@ GO
 
 -- ============================================================
 -- Trigger: TR_BOOKING_STATUS_AND_AUDIT
--- Enforces cancellation state transitions and prevents
--- deletion of cancelled bookings (BR-21).
+-- Enforces cancellation state transitions, usage session requirements
+-- for Check-In and Completion, and cancellation auditability (BR-15, BR-16, BR-21).
 -- ============================================================
 CREATE TRIGGER TR_BOOKING_STATUS_AND_AUDIT
 ON BOOKING
@@ -309,6 +309,38 @@ BEGIN
     )
     BEGIN
         RAISERROR ('A booking may be cancelled only if the booking status is Pending or Approved.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    -- Enforce Check-In Rule: Status can only be set to 'Checked In' if a UsageSession with actual_start exists
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        WHERE i.booking_status = 'Checked In'
+          AND NOT EXISTS (
+              SELECT 1 FROM USAGESESSION u
+              WHERE u.booking_id = i.booking_id AND u.actual_start IS NOT NULL
+          )
+    )
+    BEGIN
+        RAISERROR ('A booking can only have status Checked In if a UsageSession with actual_start exists.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    -- Enforce Completion Rule: Status can only be set to 'Completed' if a UsageSession with actual_end exists
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        WHERE i.booking_status = 'Completed'
+          AND NOT EXISTS (
+              SELECT 1 FROM USAGESESSION u
+              WHERE u.booking_id = i.booking_id AND u.actual_end IS NOT NULL
+          )
+    )
+    BEGIN
+        RAISERROR ('A booking can only have status Completed if a UsageSession with actual_end (checkout) exists.', 16, 1);
         ROLLBACK TRANSACTION;
         RETURN;
     END

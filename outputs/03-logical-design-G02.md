@@ -253,7 +253,7 @@ BEGIN
 END;
 GO
 
--- 3. Booking Cancellation State Transition & Audit Trigger (BR-21)
+-- 3. Booking Status Transition & Audit Trigger (BR-15, BR-16, BR-21)
 CREATE TRIGGER TR_BOOKING_STATUS_AND_AUDIT
 ON BOOKING
 AFTER UPDATE, DELETE
@@ -271,6 +271,38 @@ BEGIN
     )
     BEGIN
         RAISERROR ('A booking may be cancelled only if the booking status is Pending or Approved.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    -- Enforce Check-In Rule: Status can only be set to 'Checked In' if a UsageSession with actual_start exists
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        WHERE i.booking_status = 'Checked In'
+          AND NOT EXISTS (
+              SELECT 1 FROM USAGESESSION u
+              WHERE u.booking_id = i.booking_id AND u.actual_start IS NOT NULL
+          )
+    )
+    BEGIN
+        RAISERROR ('A booking can only have status Checked In if a UsageSession with actual_start exists.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    -- Enforce Completion Rule: Status can only be set to 'Completed' if a UsageSession with actual_end exists
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        WHERE i.booking_status = 'Completed'
+          AND NOT EXISTS (
+              SELECT 1 FROM USAGESESSION u
+              WHERE u.booking_id = i.booking_id AND u.actual_end IS NOT NULL
+          )
+    )
+    BEGIN
+        RAISERROR ('A booking can only have status Completed if a UsageSession with actual_end (checkout) exists.', 16, 1);
         ROLLBACK TRANSACTION;
         RETURN;
     END
@@ -458,7 +490,7 @@ BEGIN
         SELECT 1
         FROM inserted i
         JOIN deleted d ON i.booking_id = d.booking_id
-        WHERE d.booking_status IN ('Approved', 'Checked In')
+        WHERE d.booking_status <> 'Pending'
           AND (
               i.space_code <> d.space_code
               OR i.requested_start <> d.requested_start
