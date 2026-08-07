@@ -222,12 +222,35 @@ END;
 GO
 
 -- ------------------------------------------------------------
--- Note on Concurrency & Stored Procedures Workflow (C08-04, C08-06, Step 11/12):
--- Per the project workflow rules, Step 10 focuses exclusively on DDL Schema Migration.
--- Transactional stored procedures, including dbo.sp_ApproveBooking (which implements
--- atomic instant auto-approval for Lecturers/TAs and staff approvals under strict 2PL)
--- and dbo.sp_EscalateMaintenanceImpact, are implemented in outputs/12-concurrency-implementation-G02.sql.
+-- 4.3 Stored Procedure Stub: dbo.sp_ApproveBooking (C08-04, C08-06, P2-BR-07, P2-BR-10)
+-- Registers the booking approval stored procedure for Instant (Lecturer/TA) and Staff approval workflows.
+-- Note: Full transactional concurrency control (Strict 2PL with UPDLOCK/HOLDLOCK) is implemented in Step 12 (outputs/12-concurrency-implementation-G02.sql).
 -- ------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.sp_ApproveBooking
+    @BookingId INT,
+    @ApproverId VARCHAR(50) = NULL,
+    @DecisionNote NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @BookingId IS NULL
+    BEGIN
+        RAISERROR('BookingId is required.', 16, 1);
+        RETURN;
+    END
+
+    UPDATE dbo.BOOKING
+    SET booking_status = 'Approved',
+        approver_id = @ApproverId,
+        decision_time = GETDATE(),
+        decision_note = @DecisionNote
+    WHERE booking_id = @BookingId
+      AND booking_status = 'Pending';
+END;
+GO
+
+PRINT 'Stored Procedure stub dbo.sp_ApproveBooking registered successfully.';
 GO
 
 -- ============================================================
