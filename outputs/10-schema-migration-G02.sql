@@ -69,7 +69,6 @@ BEGIN TRY
     -- 2.2 Table: BOOKING (Change ID: C08-04, C08-06, P2-BR-07, P2-BR-10, P2-BR-11, CC-01-03)
     -- Add resolution_path column with DEFAULT 'Staff' and CHECK constraint.
     -- Baseline backfill: Pre-existing booking records receive 'Staff'.
-    -- Add row_version ROWVERSION column for optimistic concurrency support.
     -- ------------------------------------------------------------
     IF COL_LENGTH('dbo.BOOKING', 'resolution_path') IS NULL
     BEGIN
@@ -83,13 +82,6 @@ BEGIN TRY
     BEGIN
         PRINT 'Adding CHECK constraint [CK_BOOKING_RESOLUTION_PATH] to [BOOKING]...';
         EXEC('ALTER TABLE dbo.BOOKING ADD CONSTRAINT CK_BOOKING_RESOLUTION_PATH CHECK (resolution_path IN (''Instant'', ''Staff''));');
-    END;
-
-    IF COL_LENGTH('dbo.BOOKING', 'row_version') IS NULL
-    BEGIN
-        PRINT 'Adding column [row_version] (ROWVERSION) to [BOOKING]...';
-        ALTER TABLE dbo.BOOKING
-            ADD row_version ROWVERSION NOT NULL;
     END;
 
     COMMIT TRANSACTION;
@@ -158,6 +150,8 @@ BEGIN TRY
                 CHECK (old_impact_level IN ('advisory', 'out-of-service')),
             CONSTRAINT CK_HIST_NEW_IMPACT
                 CHECK (new_impact_level IN ('advisory', 'out-of-service')),
+            CONSTRAINT CK_HIST_TRANSITION
+                CHECK (old_impact_level <> new_impact_level),
             CONSTRAINT FK_HIST_MAINTENANCE
                 FOREIGN KEY (maintenance_id) REFERENCES dbo.MAINTENANCERECORD(maintenance_id) ON DELETE NO ACTION ON UPDATE NO ACTION,
             CONSTRAINT FK_HIST_USER
@@ -247,7 +241,7 @@ SELECT
 FROM sys.columns c
 JOIN sys.types t ON c.user_type_id = t.user_type_id
 WHERE c.object_id = OBJECT_ID('dbo.BOOKING')
-  AND c.name IN ('resolution_path', 'row_version');
+  AND c.name = 'resolution_path';
 
 -- 5.2 Verify Created Tables Existence and Row Counts
 SELECT 
@@ -270,7 +264,8 @@ WHERE chk.name IN (
     'CK_MAINTENANCERECORD_IMPACT_LEVEL',
     'CK_BOOKING_RESOLUTION_PATH',
     'CK_HIST_OLD_IMPACT',
-    'CK_HIST_NEW_IMPACT'
+    'CK_HIST_NEW_IMPACT',
+    'CK_HIST_TRANSITION'
 );
 
 -- 5.4 Verify Data Backfill Distribution on Pre-Existing Baseline Rows

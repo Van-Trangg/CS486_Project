@@ -14,7 +14,7 @@ This logical database design translates the conceptual model (ERD) into a set of
   - For the junction table `SPACE_FACILITY`, `ON DELETE CASCADE` is set for foreign keys referencing both `SPACE` and `FACILITY`. This prevents orphaned rows in the junction table.
   - For all other tables referencing `USER` or `SPACE` (such as `BOOKING`, `USAGESESSION`, and `MAINTENANCERECORD`), `ON DELETE NO ACTION` and `ON UPDATE NO ACTION` are defined. This prevents deletion of users or spaces that have associated historical booking or maintenance logs, thereby protecting data auditability.
 * **No Redundant Visual Diagrams**: In alignment with the project instructions, graphical schema diagrams are omitted from this document as the structural relationships have been fully conceptualized and validated in the preceding Step 2 ERD.
-* **Procedural Enforcement Strategy**: Complex business rules that cannot be expressed through simple CHECK constraints are enforced using database triggers and user-defined functions. This includes overlap prevention (BR-11/12), future-booking enforcement with role exemptions (BR-20), role-based permission validation (Assumption 1), booking modification locks (BR-22), usage session validation (Assumption 9), and booking cancellation state machine rules (BR-21).
+* **Procedural Enforcement Strategy**: Complex business rules that cannot be expressed through simple CHECK constraints are enforced using database triggers and user-defined functions. This includes overlap prevention (BR-11/12, BR-23), where only bookings currently reserving (`Approved`) or occupying (`Checked In`) a space are considered blocking, while `No-Show`, `Cancelled`, `Rejected`, and `Completed` bookings do not block new requests. `No-Show` bookings remain historically traceable as previously approved reservations but are excluded from active overlap checks. Other enforced rules include future-booking enforcement with role exemptions (BR-20), role-based permission validation (Assumption 1), booking modification locks (BR-22), usage session validation (Assumption 9), and booking cancellation state machine rules (BR-21).
 
 ---
 
@@ -214,7 +214,9 @@ BEGIN
 END;
 GO
 
--- 2. Overlapping Bookings & Maintenance Trigger (BR-11, BR-12)
+-- 2. Overlapping Bookings & Maintenance Trigger (BR-11, BR-12, BR-23)
+--    Only Approved (reserving) and Checked In (occupying) bookings block space.
+--    No-Show, Cancelled, Rejected, and Completed bookings do not block new requests.
 CREATE TRIGGER TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE
 ON BOOKING
 AFTER INSERT, UPDATE
@@ -226,13 +228,13 @@ BEGIN
         SELECT 1 
         FROM inserted i
         JOIN SPACE s ON i.space_code = s.space_code
-        WHERE i.booking_status = 'Approved'
+        WHERE i.booking_status IN ('Approved', 'Checked In')
           AND (
               s.current_status IN ('Retired', 'Temporarily Closed')
               OR EXISTS (
                   SELECT 1 FROM BOOKING b
                   WHERE b.space_code = i.space_code AND b.booking_id <> i.booking_id
-                    AND b.booking_status = 'Approved'
+                    AND b.booking_status IN ('Approved', 'Checked In')
                     AND i.requested_start < b.requested_end AND i.requested_end > b.requested_start
               )
               OR EXISTS (
@@ -290,7 +292,7 @@ GO
 
 -- 4. Maintenance-to-Booking Overlap Prevention Trigger (BR-12, REC-1)
 --    Enforces bidirectional overlap check: when a maintenance record is created or
---    updated, verify it does not conflict with any existing approved booking.
+--    updated, verify it does not conflict with any existing approved or checked-in booking.
 CREATE TRIGGER TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP
 ON MAINTENANCERECORD
 AFTER INSERT, UPDATE
@@ -303,12 +305,12 @@ BEGIN
         FROM inserted i
         JOIN BOOKING b ON b.space_code = i.space_code
         WHERE i.maintenance_status IN ('Reported', 'In Progress')
-          AND b.booking_status = 'Approved'
+          AND b.booking_status IN ('Approved', 'Checked In')
           AND b.requested_start < ISNULL(i.completion_time, '9999-12-31')
           AND b.requested_end > i.start_time
     )
     BEGIN
-        RAISERROR ('Maintenance record conflicts with an existing approved booking for the same space and time period.', 16, 1);
+        RAISERROR ('Maintenance record conflicts with an existing approved or checked-in booking for the same space and time period.', 16, 1);
         ROLLBACK TRANSACTION;
     END
 END;
@@ -456,7 +458,7 @@ BEGIN
         SELECT 1
         FROM inserted i
         JOIN deleted d ON i.booking_id = d.booking_id
-        WHERE d.booking_status = 'Approved'
+        WHERE d.booking_status IN ('Approved', 'Checked In')
           AND (
               i.space_code <> d.space_code
               OR i.requested_start <> d.requested_start
@@ -464,7 +466,7 @@ BEGIN
           )
     )
     BEGIN
-        RAISERROR ('Once a booking has been approved, the space, start time, and end time cannot be modified. Cancel and resubmit instead.', 16, 1);
+        RAISERROR ('Once a booking has been approved or checked in, the space, start time, and end time cannot be modified. Cancel and resubmit instead.', 16, 1);
         ROLLBACK TRANSACTION;
     END
 END;
@@ -508,7 +510,7 @@ This matrix traces each mapped table, column, and constraint back to its source 
 | `BOOKING` | `requested_end` | `BOOKING.requested_end` | §4.4, §3.4 | Requested end time. CHECK order constraint. |
 | `BOOKING` | `purpose` | `BOOKING.purpose` | §4.4, §3.4 | CHECK constraint checks purpose enums. |
 | `BOOKING` | `expected_participants`| `BOOKING.expected_participants`| §4.4, §3.4 | CHECK enforces count > 0 and <= capacity via UDF. |
-| `BOOKING` | `booking_status`| `BOOKING.booking_status` | §4.4, §3.4, §7.21, §7.22 | CHECK constraint checks status enums. Trigger prevents overlap if 'Approved'. Trigger `TR_BOOKING_STATUS_AND_AUDIT` enforces cancellation and audit rules (BR-21). Trigger `TR_BOOKING_LOCK_APPROVED_FIELDS` prevents modification of space/start/end once approved (BR-22). |
+| `BOOKING` | `booking_status`| `BOOKING.booking_status` | §4.4, §3.4, §7.21, §7.22 | CHECK constraint checks status enums. Trigger prevents overlap if 'Approved' or 'Checked In'. Trigger `TR_BOOKING_STATUS_AND_AUDIT` enforces cancellation and audit rules (BR-21). Trigger `TR_BOOKING_LOCK_APPROVED_FIELDS` prevents modification of space/start/end once approved or checked in (BR-22). |
 | `BOOKING` | `created_at` | `BOOKING.created_at` | §4.4, §3.4 | DEFAULT constraint `GETDATE()`. |
 | `BOOKING` | `approver_id` | `BOOKING.approver_id` | §4.4, §3.4, §8.1 | FK references USER. Nullable. Trigger `TR_BOOKING_VALIDATE_APPROVER_ROLE` enforces that approver must be Facility Staff or Manager (Assumption 1). |
 | `BOOKING` | `decision_time` | `BOOKING.decision_time` | §4.4, §3.4 | Nullable decision time. |
@@ -540,13 +542,13 @@ This matrix traces each mapped table, column, and constraint back to its source 
 | `dbo.fn_CheckSpaceCapacity` | UDF | `BOOKING` (via CHECK) | §7.19 (BR-19) | Validates expected participants ≤ space capacity. |
 | `TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE` | Trigger (AFTER INSERT, UPDATE) | `BOOKING` | §7.11 (BR-11), §7.12 (BR-12) | Prevents double booking, scheduling during maintenance, and booking of retired/closed spaces. |
 | `TR_BOOKING_STATUS_AND_AUDIT` | Trigger (AFTER UPDATE, DELETE) | `BOOKING` | §7.21 (BR-21) | Enforces cancellation state transitions and prevents deletion of cancelled bookings. |
-| `TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP` | Trigger (AFTER INSERT, UPDATE) | `MAINTENANCERECORD` | §7.12 (BR-12), REC-1 | Bidirectional overlap check: prevents maintenance from conflicting with approved bookings. |
+| `TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP` | Trigger (AFTER INSERT, UPDATE) | `MAINTENANCERECORD` | §7.12 (BR-12), REC-1 | Bidirectional overlap check: prevents maintenance from conflicting with Approved or Checked In bookings. |
 | `TR_BOOKING_FUTURE_START_ENFORCEMENT` | Trigger (AFTER INSERT, UPDATE) | `BOOKING` | §7.20 (BR-20), REC-2 | Enforces future-only booking start with role exemption for Facility Staff/Manager. |
 | `TR_BOOKING_VALIDATE_APPROVER_ROLE` | Trigger (AFTER INSERT, UPDATE) | `BOOKING` | §8.1 (Assumption 1), REC-3 | Validates that the approver has Facility Staff or Facility Manager role. |
 | `TR_USAGESESSION_VALIDATE_STAFF_ROLES` | Trigger (AFTER INSERT, UPDATE) | `USAGESESSION` | §8.1 (Assumption 1), REC-3 | Validates check-in/out staff have Facility Staff or Facility Manager role. |
 | `TR_MAINTENANCE_VALIDATE_ASSIGNED_ROLE` | Trigger (AFTER INSERT, UPDATE) | `MAINTENANCERECORD` | §8.1 (Assumption 1), REC-3 | Validates assigned staff has Facility Staff or Facility Manager role. |
 | `TR_USAGESESSION_CHECK_BOOKING_STATUS` | Trigger (AFTER INSERT) | `USAGESESSION` | §8.9 (Assumption 9), REC-4 | Ensures usage session creation only for bookings with status 'Approved'. |
-| `TR_BOOKING_LOCK_APPROVED_FIELDS` | Trigger (AFTER UPDATE) | `BOOKING` | §7.22 (BR-22) | Prevents modification of space_code, requested_start, and requested_end once booking is approved. |
+| `TR_BOOKING_LOCK_APPROVED_FIELDS` | Trigger (AFTER UPDATE) | `BOOKING` | §7.22 (BR-22) | Prevents modification of space_code, requested_start, and requested_end once booking is approved or checked in. |
 
 ---
 
