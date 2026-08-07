@@ -529,7 +529,7 @@ GO
 -- ============================================================
 -- Trigger: TR_BOOKING_LOCK_APPROVED_FIELDS
 -- Prevents modification of space_code, requested_start, and
--- requested_end once booking is approved (BR-22).
+-- requested_end once booking is approved or checked in (BR-22).
 -- ============================================================
 CREATE TRIGGER TR_BOOKING_LOCK_APPROVED_FIELDS
 ON BOOKING
@@ -542,7 +542,7 @@ BEGIN
         SELECT 1
         FROM inserted i
         JOIN deleted d ON i.booking_id = d.booking_id
-        WHERE d.booking_status = 'Approved'
+        WHERE d.booking_status <> 'Pending'
           AND (
               i.space_code <> d.space_code
               OR i.requested_start <> d.requested_start
@@ -550,7 +550,7 @@ BEGIN
           )
     )
     BEGIN
-        RAISERROR ('Once a booking has been approved, the space, start time, and end time cannot be modified. Cancel and resubmit instead.', 16, 1);
+        RAISERROR ('Once a booking has been approved or checked in, the space, start time, and end time cannot be modified. Cancel and resubmit instead.', 16, 1);
         ROLLBACK TRANSACTION;
     END
 END;
