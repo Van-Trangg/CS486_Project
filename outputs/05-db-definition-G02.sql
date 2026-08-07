@@ -251,7 +251,9 @@ GO
 -- ============================================================
 -- Trigger: TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE
 -- Prevents double booking, scheduling during maintenance,
--- and booking of retired/closed spaces (BR-11, BR-12).
+-- and booking of retired/closed spaces (BR-11, BR-12, BR-23).
+-- Per BR-23, only bookings with status 'Approved' (reserving)
+-- or 'Checked In' (occupying) block overlapping requests.
 -- ============================================================
 CREATE TRIGGER TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE
 ON BOOKING
@@ -264,13 +266,13 @@ BEGIN
         SELECT 1
         FROM inserted i
         JOIN SPACE s ON i.space_code = s.space_code
-        WHERE i.booking_status = 'Approved'
+        WHERE i.booking_status IN ('Approved', 'Checked In')
           AND (
               s.current_status IN ('Retired', 'Temporarily Closed')
               OR EXISTS (
                   SELECT 1 FROM BOOKING b
                   WHERE b.space_code = i.space_code AND b.booking_id <> i.booking_id
-                    AND b.booking_status = 'Approved'
+                    AND b.booking_status IN ('Approved', 'Checked In')
                     AND i.requested_start < b.requested_end AND i.requested_end > b.requested_start
               )
               OR EXISTS (
@@ -365,7 +367,9 @@ GO
 -- ============================================================
 -- Trigger: TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP
 -- Bidirectional overlap check: prevents maintenance from
--- conflicting with approved bookings (BR-12, REC-1).
+-- conflicting with reserved/occupied bookings (BR-12, BR-23,
+-- REC-1). Per BR-23, both 'Approved' (reserving) and
+-- 'Checked In' (occupying) bookings occupy the space.
 -- ============================================================
 CREATE TRIGGER TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP
 ON MAINTENANCERECORD
@@ -379,12 +383,12 @@ BEGIN
         FROM inserted i
         JOIN BOOKING b ON b.space_code = i.space_code
         WHERE i.maintenance_status IN ('Reported', 'In Progress')
-          AND b.booking_status = 'Approved'
+          AND b.booking_status IN ('Approved', 'Checked In')
           AND b.requested_start < ISNULL(i.completion_time, '9999-12-31')
           AND b.requested_end > i.start_time
     )
     BEGIN
-        RAISERROR ('Maintenance record conflicts with an existing approved booking for the same space and time period.', 16, 1);
+        RAISERROR ('Maintenance record conflicts with an existing approved or checked-in booking for the same space and time period.', 16, 1);
         ROLLBACK TRANSACTION;
     END
 END;
