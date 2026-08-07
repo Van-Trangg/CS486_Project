@@ -211,6 +211,48 @@ GO
 PRINT 'Trigger TR_BOOKING_RESOLUTION_PATH_IMMUTABLE created successfully.';
 GO
 
+-- 4.2 Drop obsolete Phase 1 trigger TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP (C08-01, P2-BR-06)
+-- In Phase 2, maintenance creation/escalation must not be blocked by pre-existing approved bookings.
+-- Overlapping approved bookings are identified via Report Query 4 for staff follow-up.
+IF OBJECT_ID('dbo.TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP', 'TR') IS NOT NULL
+BEGIN
+    DROP TRIGGER dbo.TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP;
+    PRINT 'Obsolete Phase 1 trigger [TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP] dropped successfully.';
+END;
+GO
+
+-- ------------------------------------------------------------
+-- 4.3 Stored Procedure Stub: dbo.sp_ApproveBooking (C08-04, C08-06, P2-BR-07, P2-BR-10)
+-- Registers the booking approval stored procedure for Instant (Lecturer/TA) and Staff approval workflows.
+-- Note: Full transactional concurrency control (Strict 2PL with UPDLOCK/HOLDLOCK) is implemented in Step 12 (outputs/12-concurrency-implementation-G02.sql).
+-- ------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.sp_ApproveBooking
+    @BookingId INT,
+    @ApproverId VARCHAR(50) = NULL,
+    @DecisionNote NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @BookingId IS NULL
+    BEGIN
+        RAISERROR('BookingId is required.', 16, 1);
+        RETURN;
+    END
+
+    UPDATE dbo.BOOKING
+    SET booking_status = 'Approved',
+        approver_id = @ApproverId,
+        decision_time = GETDATE(),
+        decision_note = @DecisionNote
+    WHERE booking_id = @BookingId
+      AND booking_status = 'Pending';
+END;
+GO
+
+PRINT 'Stored Procedure stub dbo.sp_ApproveBooking registered successfully.';
+GO
+
 -- ============================================================
 -- Section 5: Post-Migration Validation & Verification Queries
 -- ============================================================
