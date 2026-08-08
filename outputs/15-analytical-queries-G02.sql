@@ -138,17 +138,33 @@ GO
    The result set is ordered by capacity ascending, then space_code.
 */
 
+-- ============================================================
+-- Performance Indexes
+-- ============================================================
+-- Designed to improve the performance of overlapping checks against BOOKING and MAINTENANCERECORD
+-- After creating these indexes, testing revealed that query 3's execution time has reduced from approximately 3 seconds to near-instantaneous
+
+CREATE INDEX IX_BOOKINGAPPROVED_OVERLAP
+ON BOOKING(space_code, requested_start)
+INCLUDE (requested_end)
+WHERE booking_status = 'Approved'
+
+CREATE INDEX IX_MAINTOOS_OVERLAP
+ON MAINTENANCERECORD(space_code, start_time, completion_time)
+INCLUDE (maintenance_status)
+WHERE impact_level='out-of-service'
+
 PRINT '--- Query 3: Available Spaces by Capacity, Facilities, and Time Period ---';
 PRINT '--- Executing availability search ---';
 
--- Declare and set parameters (example values)
-DECLARE @RequiredCapacity INT       = 30;
-DECLARE @StartTime        DATETIME  = '2026-08-10 09:00:00';
-DECLARE @EndTime          DATETIME  = '2026-08-10 11:00:00';
+-- Declare and set parameters (change according to request)
+DECLARE @RequiredCapacity INT       = 10;
+DECLARE @StartTime        DATETIME  = '2026-03-01 09:00:00';
+DECLARE @EndTime          DATETIME  = '2026-03-01 12:00:00';
 
 -- Required facility list: populate with the facility_id values the caller needs
 DECLARE @RequiredFacilities TABLE (facility_id INT PRIMARY KEY);
-INSERT INTO @RequiredFacilities (facility_id) VALUES (1), (3), (5); -- example IDs
+--INSERT INTO @RequiredFacilities (facility_id) VALUES (1), (2); -- Projector, Whiteboard
 
 DECLARE @RequiredFacilityCount INT = (SELECT COUNT(*) FROM @RequiredFacilities);
 
@@ -163,13 +179,13 @@ SELECT
     s.current_status
 FROM SPACE s
 WHERE
-    -- 1. Capacity requirement
+    -- Capacity requirement
     s.capacity >= @RequiredCapacity
 
-    -- 2. Space must not be permanently unavailable (Retired / Temporarily Closed)
-    AND s.current_status NOT IN ('Retired', 'Temporarily Closed')
+    -- Space must be available for booking (Retired / Temporarily Closed / In Use)
+    AND s.current_status NOT IN ('Retired', 'Temporarily Closed', 'In Use')
 
-    -- 3. Space must have ALL required facilities, each operational
+    -- Space must have ALL required facilities, each operational
     AND @RequiredFacilityCount = (
         SELECT COUNT(DISTINCT sf.facility_id)
         FROM SPACE_FACILITY sf
@@ -178,7 +194,7 @@ WHERE
           AND sf.operation_status = 'Operational'
     )
 
-    -- 4. No approved booking overlapping the requested period
+    -- No approved booking overlapping the requested period
     AND NOT EXISTS (
         SELECT 1
         FROM BOOKING b
@@ -188,7 +204,7 @@ WHERE
           AND b.requested_end >  @StartTime
     )
 
-    -- 5. No OUT-OF-SERVICE maintenance overlapping the requested period (advisory maintenance does not block availability)
+    -- No OUT-OF-SERVICE maintenance overlapping the requested period (advisory maintenance does not block availability)
     AND NOT EXISTS (
         SELECT 1
         FROM MAINTENANCERECORD m
