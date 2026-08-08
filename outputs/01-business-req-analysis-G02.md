@@ -15,7 +15,7 @@ To solve these issues, the School of Computer Science is implementing a centrali
 ### Main Objectives of the System:
 1. **Fair Access:** Facilitate a structured process where eligible requesters (students, lecturers, teaching assistants, staff) can request spaces.
 2. **Conflict Prevention:** Guarantee that the same physical space cannot have overlapping approved bookings at any given time.
-3. **Availability Control:** Prevent bookings of spaces that are currently under maintenance, temporarily closed, or retired.
+3. **Availability Control:** Prevent bookings of spaces that are currently under maintenance, in use, temporarily closed, or retired.
 4. **Historical Logging:** Preserve complete and accurate historical records of space bookings, actual usage sessions, and maintenance activities for utilization analysis and audit trails.
 
 ---

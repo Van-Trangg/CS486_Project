@@ -138,16 +138,19 @@ INSERT #Checks VALUES
 ('Invalid staff-role references', @InvalidStaffRoles, '= 0',
  IIF(@InvalidStaffRoles = 0, 'PASS', 'FAIL'));
 
-DECLARE @ApprovedConflicts BIGINT =
-(
-    SELECT COUNT_BIG(*)
-    FROM dbo.BOOKING b1
-    JOIN dbo.BOOKING b2 ON b2.space_code=b1.space_code AND b2.booking_id>b1.booking_id
-    WHERE b1.booking_status IN ('Approved','Checked In')
-      AND b2.booking_status IN ('Approved','Checked In')
-      AND b1.requested_start < b2.requested_end
-      AND b1.requested_end > b2.requested_start
-);
+DECLARE @ApprovedConflicts BIGINT;
+
+SELECT @ApprovedConflicts = COUNT_BIG(*)
+FROM dbo.BOOKING b1
+JOIN dbo.BOOKING b2
+    ON b2.space_code = b1.space_code
+   AND b2.booking_id > b1.booking_id
+WHERE b1.booking_status IN ('Approved', 'Checked In')
+  AND b2.booking_status IN ('Approved', 'Checked In')
+  AND b1.requested_start < b2.requested_end
+  AND b1.requested_end > b2.requested_start
+OPTION (MAXDOP 1);
+SELECT @ApprovedConflicts AS ApprovedConflicts;
 INSERT #Checks VALUES ('Approved-lifecycle overlap pairs', @ApprovedConflicts, '= 0', IIF(@ApprovedConflicts=0, 'PASS', 'FAIL'));
 
 DECLARE @MissingUsage BIGINT =
@@ -416,41 +419,55 @@ DECLARE @CurrentOosOverlap BIGINT =
           ) > b.requested_start
 );
 
+DROP TABLE IF EXISTS #ImpactHistory;
 
-DECLARE @InvalidApprovalDuringOos BIGINT =
+SELECT
+    maintenance_id,
+    changed_at,
+    old_impact_level
+INTO #ImpactHistory
+FROM dbo.MAINTENANCE_IMPACT_HISTORY;
+
+CREATE CLUSTERED INDEX IX_TempImpactHistory
+ON #ImpactHistory
 (
-    SELECT COUNT_BIG(*)
-    FROM dbo.BOOKING b
-    JOIN dbo.MAINTENANCERECORD m
-      ON m.space_code = b.space_code
-
-    OUTER APPLY
-    (
-        SELECT TOP (1)
-            h.old_impact_level AS impact_at_decision
-        FROM dbo.MAINTENANCE_IMPACT_HISTORY h
-        WHERE h.maintenance_id = m.maintenance_id
-          AND h.changed_at > b.decision_time
-        ORDER BY h.changed_at
-    ) next_change
-
-    WHERE b.decision_time IS NOT NULL
-      AND b.booking_status IN
-          ('Approved', 'Checked In', 'Completed', 'No-Show')
-
-      AND m.start_time < b.requested_end
-      AND ISNULL(
-            m.completion_time,
-            CONVERT(DATETIME, '9999-12-31', 120)
-          ) > b.requested_start
-
-      AND COALESCE(
-            next_change.impact_at_decision,
-            m.impact_level
-          ) = 'out-of-service'
+    maintenance_id,
+    changed_at
 );
 
+DECLARE @InvalidApprovalDuringOos BIGINT;
 
+SELECT @InvalidApprovalDuringOos = COUNT_BIG(*)
+FROM dbo.BOOKING b
+JOIN dbo.MAINTENANCERECORD m
+    ON m.space_code = b.space_code
+   AND m.start_time < b.requested_end
+   AND ISNULL(
+         m.completion_time,
+         CONVERT(DATETIME, '9999-12-31', 120)
+       ) > b.requested_start
+
+OUTER APPLY
+(
+    SELECT TOP (1)
+        h.old_impact_level AS impact_at_decision
+    FROM #ImpactHistory h
+    WHERE h.maintenance_id = m.maintenance_id
+      AND h.changed_at > b.decision_time
+    ORDER BY h.changed_at
+) next_change
+
+WHERE b.decision_time IS NOT NULL
+  AND b.booking_status IN
+      ('Approved', 'Checked In', 'Completed', 'No-Show')
+  AND COALESCE(
+        next_change.impact_at_decision,
+        m.impact_level
+      ) = 'out-of-service'
+OPTION (MAXDOP 1);
+
+SELECT @InvalidApprovalDuringOos;
+DROP TABLE IF EXISTS #ImpactHistory;
 DECLARE @OrphanMaintenanceHistory BIGINT =
 (
     SELECT COUNT_BIG(*)

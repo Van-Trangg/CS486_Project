@@ -272,7 +272,7 @@ BEGIN
         WHERE i.booking_status IN ('Approved', 'Checked In')
           AND
           (
-              s.current_status IN ('Retired', 'Temporarily Closed')
+              s.current_status IN ('Retired', 'Temporarily Closed', 'In Use')
               OR EXISTS
               (
                   SELECT 1
