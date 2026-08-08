@@ -153,7 +153,7 @@ def validate_target_database(database: str, allow_non_disposable: bool) -> bool:
     normalized = database.strip().lower()
     if not normalized:
         raise ValueError("A target database is required")
-    if normalized == "university":
+    if normalized == "university" and not allow_non_disposable:
         raise RuntimeError("Refusing to target University under any generator option.")
     disposable = normalized.startswith(DISPOSABLE_PREFIXES)
     if not disposable and not allow_non_disposable:

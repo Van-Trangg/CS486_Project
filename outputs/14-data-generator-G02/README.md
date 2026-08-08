@@ -4,7 +4,7 @@ This package deterministically generates the migrated Campus Space Management Sy
 
 ## Safety Model
 
-- `University` is always refused, including with `--allow-non-disposable`.
+- University and other non-disposable databases are refused by default. An empty target may be loaded only with the explicit --allow-non-disposable flag. Reset remains prohibited on non-disposable targets.
 - Full generation accepts disposable names beginning with `Step14`, `Test`, or `Dev` by default.
 - Existing rows cause generation to stop unless `--reset-generated-data` is supplied.
 - Reset is allowed only for a disposable database name and deletes all nine project tables in foreign-key-safe order.
