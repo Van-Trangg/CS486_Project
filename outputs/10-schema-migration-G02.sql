@@ -221,7 +221,153 @@ BEGIN
 END;
 GO
 
+CREATE OR ALTER TRIGGER dbo.TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE
+ON dbo.BOOKING
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
 
+    IF EXISTS
+    (
+        SELECT 1
+        FROM inserted AS i
+        JOIN dbo.SPACE AS s ON s.space_code = i.space_code
+        WHERE i.booking_status IN ('Approved', 'Checked In')
+          AND
+          (
+              s.current_status IN ('Retired', 'Temporarily Closed')
+              OR EXISTS
+              (
+                  SELECT 1
+                  FROM dbo.BOOKING AS b
+                  WHERE b.space_code = i.space_code
+                    AND b.booking_id <> i.booking_id
+                    AND b.booking_status IN ('Approved', 'Checked In')
+                    AND b.requested_start < i.requested_end
+                    AND b.requested_end > i.requested_start
+              )
+              OR EXISTS
+              (
+                  SELECT 1
+                  FROM dbo.MAINTENANCERECORD AS m
+                  WHERE m.space_code = i.space_code
+                    AND m.maintenance_status IN ('Reported', 'In Progress')
+                    AND m.impact_level = 'out-of-service'
+                    AND m.start_time < i.requested_end
+                    AND ISNULL(m.completion_time, CONVERT(DATETIME, '9999-12-31', 120)) > i.requested_start
+              )
+          )
+    )
+    BEGIN
+        THROW 51001, 'Approved bookings cannot overlap another approved booking, active out-of-service maintenance, or an unavailable space.', 1;
+    END;
+END;
+GO
+CREATE OR ALTER TRIGGER dbo.TR_BOOKING_LOCK_SUBMISSION_FACTS
+ON dbo.BOOKING
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM inserted AS i
+        JOIN deleted AS d
+            ON d.booking_id = i.booking_id
+        WHERE
+               i.requester_id <> d.requester_id
+            OR i.space_code <> d.space_code
+            OR i.requested_start <> d.requested_start
+            OR i.requested_end <> d.requested_end
+    )
+    BEGIN
+        THROW 51070,
+            'Requester, space, and requested period cannot be changed after booking submission.',
+            1;
+    END;
+END;
+GO
+/* =========================================================
+   BOOKING_ADVISORY_ACK — SCHEMA INTEGRITY BACKSTOP
+   ========================================================= */
+
+-- 1. Reject acknowledgements that were not applicable
+CREATE OR ALTER TRIGGER dbo.TR_BOOKING_ADVISORY_ACK_VALIDATE_INSERT
+ON dbo.BOOKING_ADVISORY_ACK
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM inserted i
+        JOIN dbo.BOOKING b
+            ON b.booking_id = i.booking_id
+        JOIN dbo.MAINTENANCERECORD m
+            ON m.maintenance_id = i.maintenance_id
+        WHERE
+            -- Advisory must belong to the same space
+            m.space_code <> b.space_code
+
+            -- Must be active at acknowledgement insertion
+            OR m.maintenance_status NOT IN ('Reported', 'In Progress')
+
+            -- Only advisory maintenance may be acknowledged
+            OR m.impact_level <> 'advisory'
+
+            -- Booking interval must overlap maintenance interval
+            OR NOT
+            (
+                m.start_time < b.requested_end
+                AND (
+                    m.completion_time IS NULL
+                    OR m.completion_time > b.requested_start
+                )
+            )
+    )
+    BEGIN
+        THROW 51020,
+            'Invalid advisory acknowledgement: maintenance must be an active overlapping advisory for the booking space.',
+            1;
+    END;
+END;
+GO
+
+
+-- 2. ACK rows are audit records: never update or delete them
+CREATE OR ALTER TRIGGER dbo.TR_BOOKING_ADVISORY_ACK_IMMUTABLE
+ON dbo.BOOKING_ADVISORY_ACK
+INSTEAD OF UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    THROW 51021,
+        'Booking advisory acknowledgement records are immutable and cannot be updated or deleted.',
+        1;
+END;
+GO
+
+CREATE OR ALTER TRIGGER dbo.TR_MAINTENANCE_IMPACT_HISTORY_IMMUTABLE
+ON dbo.MAINTENANCE_IMPACT_HISTORY
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        THROW 51023,
+            'Maintenance impact history is immutable and cannot be updated or deleted.',
+            1;
+    END;
+END;
+GO
 /* ============================================================
 -- 4.3 Stored Procedure Stub: dbo.sp_SubmitBooking (C08-04, C08-06, P2-BR-07, P2-BR-10)
    Booking submission and resolution-path assignment

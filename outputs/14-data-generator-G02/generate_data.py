@@ -395,7 +395,14 @@ def generate_dataset(config: GeneratorConfig, booking_limit: int | None = None) 
     ack_id = 1
     for booking in bookings:
         for maintenance_id in broad_advisory_ids_by_space.get(booking[1], []):
-            acknowledgements.append((ack_id, booking[0], maintenance_id, booking[8] + timedelta(minutes=5)))
+            acknowledgements.append(
+                (
+                    ack_id,
+                    booking[0],
+                    maintenance_id,
+                    booking[8]
+                )
+            )
             ack_id += 1
 
     return Dataset(

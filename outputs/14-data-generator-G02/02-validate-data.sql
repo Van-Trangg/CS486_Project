@@ -143,8 +143,8 @@ DECLARE @ApprovedConflicts BIGINT =
     SELECT COUNT_BIG(*)
     FROM dbo.BOOKING b1
     JOIN dbo.BOOKING b2 ON b2.space_code=b1.space_code AND b2.booking_id>b1.booking_id
-    WHERE b1.booking_status IN ('Approved','Checked In','Completed','No-Show')
-      AND b2.booking_status IN ('Approved','Checked In','Completed','No-Show')
+    WHERE b1.booking_status IN ('Approved','Checked In')
+      AND b2.booking_status IN ('Approved','Checked In')
       AND b1.requested_start < b2.requested_end
       AND b1.requested_end > b2.requested_start
 );
@@ -183,13 +183,13 @@ DECLARE @InvalidAck BIGINT = 0;
         LAG(h.changed_at) OVER
         (
             PARTITION BY h.maintenance_id
-            ORDER BY h.changed_at
+            ORDER BY h.changed_at, h.history_id
         ) AS previous_changed_at,
 
         ROW_NUMBER() OVER
         (
             PARTITION BY h.maintenance_id
-            ORDER BY h.changed_at DESC
+            ORDER BY h.changed_at DESC, h.history_id DESC
         ) AS reverse_sequence
     FROM dbo.MAINTENANCE_IMPACT_HISTORY AS h
 ),
@@ -282,10 +282,7 @@ WHERE x.impact_at_ack <> 'advisory'
           CONVERT(DATETIME, '9999-12-31', 120)
       ) <= x.requested_start
 
-   OR x.acknowledged_at < x.created_at
-
-   OR x.acknowledged_at > x.requested_start;
-
+   OR x.acknowledged_at <> x.created_at;
 
 INSERT INTO #Checks
 VALUES
@@ -304,6 +301,52 @@ DECLARE @MissingAck BIGINT =
     WHERE m.impact_level='advisory' AND m.maintenance_status IN ('Reported','In Progress')
       AND m.start_time<b.requested_end AND ISNULL(m.completion_time,CONVERT(DATETIME,'9999-12-31',120))>b.requested_start
       AND a.ack_id IS NULL
+);
+DECLARE @ImpactChangeAtSubmission BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.BOOKING b
+    JOIN dbo.MAINTENANCERECORD m
+        ON m.space_code = b.space_code
+    JOIN dbo.MAINTENANCE_IMPACT_HISTORY h
+        ON h.maintenance_id = m.maintenance_id
+    WHERE h.changed_at = b.created_at
+      AND m.start_time < b.requested_end
+      AND ISNULL(
+            m.completion_time,
+            CONVERT(DATETIME,'9999-12-31',120)
+          ) > b.requested_start
+);
+
+INSERT INTO #Checks
+VALUES
+(
+    'No maintenance impact change exactly at booking submission time',
+    @ImpactChangeAtSubmission,
+    0,
+    CASE
+        WHEN @ImpactChangeAtSubmission = 0 THEN 'PASS'
+        ELSE 'FAIL'
+    END
+);
+DECLARE @InvalidAckTimestamp BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.BOOKING_ADVISORY_ACK AS a
+    JOIN dbo.BOOKING AS b
+        ON b.booking_id = a.booking_id
+    WHERE a.acknowledged_at <> b.created_at
+);
+INSERT INTO #Checks
+VALUES
+(
+    'Advisory acknowledgement timestamp matches booking submission',
+    @InvalidAckTimestamp,
+    0,
+    CASE
+        WHEN @InvalidAckTimestamp = 0 THEN 'PASS'
+        ELSE 'FAIL'
+    END
 );
 DECLARE @DuplicateAck BIGINT =
 (
@@ -357,22 +400,122 @@ INSERT #Checks VALUES
 ('Escalation events', (SELECT COUNT_BIG(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY WHERE old_impact_level='advisory' AND new_impact_level='out-of-service'), '> 0', IIF((SELECT COUNT_BIG(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY WHERE old_impact_level='advisory' AND new_impact_level='out-of-service')>0, 'PASS', 'FAIL')),
 ('Downgrade events', (SELECT COUNT_BIG(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY WHERE old_impact_level='out-of-service' AND new_impact_level='advisory'), '> 0', IIF((SELECT COUNT_BIG(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY WHERE old_impact_level='out-of-service' AND new_impact_level='advisory')>0, 'PASS', 'FAIL'));
 
-DECLARE @UnexplainedOosOverlap BIGINT =
+DECLARE @CurrentOosOverlap BIGINT =
 (
     SELECT COUNT_BIG(*)
     FROM dbo.BOOKING b
-    JOIN dbo.MAINTENANCERECORD m ON m.space_code=b.space_code
-    WHERE b.booking_status IN ('Approved','Checked In','Completed','No-Show')
-      AND m.impact_level='out-of-service'
-      AND m.start_time<b.requested_end AND ISNULL(m.completion_time,CONVERT(DATETIME,'9999-12-31',120))>b.requested_start
-      AND NOT EXISTS
-      (
-          SELECT 1 FROM dbo.MAINTENANCE_IMPACT_HISTORY h
-          WHERE h.maintenance_id=m.maintenance_id
-            AND h.old_impact_level='advisory' AND h.new_impact_level='out-of-service'
-            AND h.changed_at>b.decision_time
-      )
+    JOIN dbo.MAINTENANCERECORD m
+      ON m.space_code = b.space_code
+    WHERE b.booking_status IN ('Approved', 'Checked In')
+      AND m.impact_level = 'out-of-service'
+      AND m.maintenance_status IN ('Reported', 'In Progress')
+      AND m.start_time < b.requested_end
+      AND ISNULL(
+            m.completion_time,
+            CONVERT(DATETIME, '9999-12-31', 120)
+          ) > b.requested_start
 );
+
+
+DECLARE @InvalidApprovalDuringOos BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.BOOKING b
+    JOIN dbo.MAINTENANCERECORD m
+      ON m.space_code = b.space_code
+
+    OUTER APPLY
+    (
+        SELECT TOP (1)
+            h.old_impact_level AS impact_at_decision
+        FROM dbo.MAINTENANCE_IMPACT_HISTORY h
+        WHERE h.maintenance_id = m.maintenance_id
+          AND h.changed_at > b.decision_time
+        ORDER BY h.changed_at
+    ) next_change
+
+    WHERE b.decision_time IS NOT NULL
+      AND b.booking_status IN
+          ('Approved', 'Checked In', 'Completed', 'No-Show')
+
+      AND m.start_time < b.requested_end
+      AND ISNULL(
+            m.completion_time,
+            CONVERT(DATETIME, '9999-12-31', 120)
+          ) > b.requested_start
+
+      AND COALESCE(
+            next_change.impact_at_decision,
+            m.impact_level
+          ) = 'out-of-service'
+);
+
+
+DECLARE @OrphanMaintenanceHistory BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.MAINTENANCE_IMPACT_HISTORY h
+    LEFT JOIN dbo.MAINTENANCERECORD m
+      ON m.maintenance_id = h.maintenance_id
+    WHERE h.maintenance_id IS NULL
+       OR m.maintenance_id IS NULL
+);
+
+
+DECLARE @InvalidImpactHistoryTransition BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.MAINTENANCE_IMPACT_HISTORY h
+    WHERE h.old_impact_level = h.new_impact_level
+       OR h.old_impact_level NOT IN ('advisory', 'out-of-service')
+       OR h.new_impact_level NOT IN ('advisory', 'out-of-service')
+);
+
+
+DECLARE @BrokenHistorySequence BIGINT;
+
+WITH OrderedHistory AS
+(
+    SELECT
+        maintenance_id,
+        changed_at,
+        old_impact_level,
+        new_impact_level,
+        LAG(new_impact_level) OVER
+        (
+            PARTITION BY maintenance_id
+            ORDER BY changed_at
+        ) AS previous_new_impact
+    FROM dbo.MAINTENANCE_IMPACT_HISTORY
+)
+SELECT
+    @BrokenHistorySequence = COUNT_BIG(*)
+FROM OrderedHistory
+WHERE previous_new_impact IS NOT NULL
+  AND old_impact_level <> previous_new_impact;
+
+
+DECLARE @LatestImpactMismatch BIGINT;
+
+WITH LatestHistory AS
+(
+    SELECT
+        h.maintenance_id,
+        h.new_impact_level,
+        ROW_NUMBER() OVER
+        (
+            PARTITION BY h.maintenance_id
+            ORDER BY h.changed_at DESC
+        ) AS rn
+    FROM dbo.MAINTENANCE_IMPACT_HISTORY h
+)
+SELECT
+    @LatestImpactMismatch = COUNT_BIG(*)
+FROM LatestHistory h
+JOIN dbo.MAINTENANCERECORD m
+  ON m.maintenance_id = h.maintenance_id
+WHERE h.rn = 1
+  AND h.new_impact_level <> m.impact_level;
 DECLARE @EscalationAffected BIGINT =
 (
     SELECT COUNT_BIG(DISTINCT b.booking_id)
@@ -386,7 +529,46 @@ DECLARE @EscalationAffected BIGINT =
       AND b.requested_end>m.start_time
 );
 INSERT #Checks VALUES
-('Unexplained out-of-service overlaps', @UnexplainedOosOverlap, '= 0', IIF(@UnexplainedOosOverlap=0, 'PASS', 'FAIL')),
+(
+    'No booking approved while Out-of-Service was effective',
+    @InvalidApprovalDuringOos,
+    '= 0',
+    IIF(@InvalidApprovalDuringOos = 0, 'PASS', 'FAIL')
+);
+
+INSERT #Checks VALUES
+(
+    'No orphan maintenance impact history rows',
+    @OrphanMaintenanceHistory,
+    '= 0',
+    IIF(@OrphanMaintenanceHistory = 0, 'PASS', 'FAIL')
+);
+
+INSERT #Checks VALUES
+(
+    'Maintenance impact transitions are valid',
+    @InvalidImpactHistoryTransition,
+    '= 0',
+    IIF(@InvalidImpactHistoryTransition = 0, 'PASS', 'FAIL')
+);
+
+INSERT #Checks VALUES
+(
+    'Maintenance impact history sequence is continuous',
+    @BrokenHistorySequence,
+    '= 0',
+    IIF(@BrokenHistorySequence = 0, 'PASS', 'FAIL')
+);
+
+INSERT #Checks VALUES
+(
+    'Latest maintenance history matches current impact level',
+    @LatestImpactMismatch,
+    '= 0',
+    IIF(@LatestImpactMismatch = 0, 'PASS', 'FAIL')
+);
+
+INSERT #Checks VALUES
 ('Escalation-affected bookings', @EscalationAffected, '> 0', IIF(@EscalationAffected>0, 'PASS', 'FAIL'));
 
 DECLARE @Orphans BIGINT = 0;

@@ -66,49 +66,7 @@ GO
 /* Phase 1 treated every open maintenance record as unavailable. Phase 2
    blocks only active out-of-service maintenance; advisory maintenance is
    disclosed and acknowledged at booking submission instead. */
-CREATE OR ALTER TRIGGER dbo.TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE
-ON dbo.BOOKING
-AFTER INSERT, UPDATE
-AS
-BEGIN
-    SET NOCOUNT ON;
 
-    IF EXISTS
-    (
-        SELECT 1
-        FROM inserted AS i
-        JOIN dbo.SPACE AS s ON s.space_code = i.space_code
-        WHERE i.booking_status IN ('Approved', 'Checked In')
-          AND
-          (
-              s.current_status IN ('Retired', 'Temporarily Closed')
-              OR EXISTS
-              (
-                  SELECT 1
-                  FROM dbo.BOOKING AS b
-                  WHERE b.space_code = i.space_code
-                    AND b.booking_id <> i.booking_id
-                    AND b.booking_status IN ('Approved', 'Checked In')
-                    AND b.requested_start < i.requested_end
-                    AND b.requested_end > i.requested_start
-              )
-              OR EXISTS
-              (
-                  SELECT 1
-                  FROM dbo.MAINTENANCERECORD AS m
-                  WHERE m.space_code = i.space_code
-                    AND m.maintenance_status IN ('Reported', 'In Progress')
-                    AND m.impact_level = 'out-of-service'
-                    AND m.start_time < i.requested_end
-                    AND ISNULL(m.completion_time, CONVERT(DATETIME, '9999-12-31', 120)) > i.requested_start
-              )
-          )
-    )
-    BEGIN
-        THROW 51001, 'Approved bookings cannot overlap another approved booking, active out-of-service maintenance, or an unavailable space.', 1;
-    END;
-END;
-GO
 
 /* An escalation must be allowed to identify already-approved bookings for
    staff follow-up. The protected escalation procedure serializes this
@@ -117,32 +75,7 @@ GO
 DROP TRIGGER IF EXISTS dbo.TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP;
 DROP TRIGGER IF EXISTS dbo.TR_BOOKING_LOCK_APPROVED_FIELDS;
 GO
-CREATE OR ALTER TRIGGER dbo.TR_BOOKING_LOCK_SUBMISSION_FACTS
-ON dbo.BOOKING
-AFTER UPDATE
-AS
-BEGIN
-    SET NOCOUNT ON;
 
-    IF EXISTS
-    (
-        SELECT 1
-        FROM inserted AS i
-        JOIN deleted AS d
-            ON d.booking_id = i.booking_id
-        WHERE
-               i.requester_id <> d.requester_id
-            OR i.space_code <> d.space_code
-            OR i.requested_start <> d.requested_start
-            OR i.requested_end <> d.requested_end
-    )
-    BEGIN
-        THROW 51070,
-            'Requester, space, and requested period cannot be changed after booking submission.',
-            1;
-    END;
-END;
-GO
 
 /* =========================================================
    2. Protected booking submission procedure
