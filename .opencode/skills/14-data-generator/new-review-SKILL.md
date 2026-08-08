@@ -10,12 +10,12 @@ Use this skill after the Python-based Step 14 package has been created or update
 
 Expected directory:
 
-`outputs/14-new-data-generator-G02/`
+`outputs/14-data-generator-G02/`
 
 Expected files:
 
 ```text
-outputs/14-new-data-generator-G02/
+outputs/14-data-generator-G02/
 ├── generate_data.py
 ├── generator_config.json
 ├── requirements.txt
@@ -62,11 +62,11 @@ If the generator needs manual schema repair, hardcoded database replacement, bro
 Read fully:
 
 - `.opencode/skills/14-data-generator/new-SKILL.md`
-- `outputs/14-new-data-generator-G02/generate_data.py`
-- `outputs/14-new-data-generator-G02/generator_config.json`
-- `outputs/14-new-data-generator-G02/requirements.txt`
-- `outputs/14-new-data-generator-G02/README.md`
-- `outputs/14-new-data-generator-G02/02-validate-data.sql`
+- `outputs/14-data-generator-G02/generate_data.py`
+- `outputs/14-data-generator-G02/generator_config.json`
+- `outputs/14-data-generator-G02/requirements.txt`
+- `outputs/14-data-generator-G02/README.md`
+- `outputs/14-data-generator-G02/02-validate-data.sql`
 - `outputs/03-logical-design-G02.md`
 - `outputs/05-db-definition-G02.sql`
 - `outputs/09-updated-erd-and-logical-design-G02.md`
@@ -74,6 +74,7 @@ Read fully:
 - `outputs/11-concurrency-design-G02.md`
 - `outputs/12-concurrency-implementation-G02.sql`
 - `req/business-requirement-phase2.md`
+- `docs/14-generator-runtime-output-G02.txt`
 - Relevant review files under `docs/`
 
 Read optional helper files when present.

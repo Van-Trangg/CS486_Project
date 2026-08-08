@@ -133,12 +133,15 @@ def validate_config(config: GeneratorConfig) -> None:
         errors.append("every required status ratio must be greater than 0 and at most 1")
     if abs(sum(config.status_ratios.values()) - 1.0) > 1e-9:
         errors.append("status ratios must sum to exactly 1.0")
-    if not 0 <= config.instant_approval_ratio <= 1:
-        errors.append("instant_approval_ratio must be between 0 and 1")
+    if not 0 < config.instant_approval_ratio <= 1:
+        errors.append("instant_approval_ratio must be greater than 0 and at most 1")
     if config.start_date >= config.end_date:
         errors.append("start_date must be earlier than end_date")
-    covered_years = (config.end_date.year - config.start_date.year) + 1
-    if covered_years < config.academic_year_count:
+    covered_academic_years = {
+        value.year if value.month >= 9 else value.year - 1
+        for value in _date_range(config.start_date, config.end_date)
+    }
+    if len(covered_academic_years) < config.academic_year_count:
         errors.append("configured date range cannot cover academic_year_count")
     if not config.odbc_driver.strip():
         errors.append("odbc_driver must not be empty")
@@ -203,6 +206,10 @@ def generate_dataset(config: GeneratorConfig, booking_limit: int | None = None) 
         ))
     active_staff = [row[0] for row in users if row[4] in ("Facility Staff", "Facility Manager") and row[6] == "Active"]
     requesters = [row[0] for row in users if row[6] == "Active"]
+    instant_requesters = [
+        row[0] for row in users
+        if row[4] in ("Lecturer", "Teaching Assistant") and row[6] == "Active"
+    ]
 
     facility_names = (
         "Projector", "Whiteboard", "Video Conferencing", "Desktop Computers",
@@ -255,7 +262,10 @@ def generate_dataset(config: GeneratorConfig, booking_limit: int | None = None) 
     statuses = _allocate_values(booking_count, config.status_ratios, rng)
     purposes = ("Lecture", "Examination", "Seminar", "Workshop", "Meeting", "Student Activity", "Administrative Event")
     bookable_codes = [row[0] for row in spaces if row[7] not in ("Temporarily Closed", "Retired")]
-    instant_codes = [row[0] for row in spaces if row[2] in ("Meeting Room", "Student Workspace") and row[7] not in ("Temporarily Closed", "Retired")]
+    instant_codes = [
+        row[0] for row in spaces
+        if row[2] == "Classroom" and row[7] not in ("Temporarily Closed", "Retired")
+    ]
     weighted_bookable = [code for i, code in enumerate(bookable_codes) for _ in range(8 if i < 10 else 3 if i < 30 else 1)]
     weighted_instant = [code for i, code in enumerate(instant_codes) for _ in range(5 if i < 4 else 2)]
     schedules: dict[str, list[tuple[datetime, datetime]]] = defaultdict(list)
@@ -278,8 +288,8 @@ def generate_dataset(config: GeneratorConfig, booking_limit: int | None = None) 
 
     for index, status in enumerate(statuses, 1):
         instant_allowed = status in APPROVAL_LIFECYCLE_STATUSES | {"Cancelled"}
-        approval_path = "Instant" if instant_allowed and rng.random() < instant_probability else "Staff"
-        choices = weighted_instant if approval_path == "Instant" else weighted_bookable
+        resolution_path = "Instant" if instant_allowed and rng.random() < instant_probability else "Staff"
+        choices = weighted_instant if resolution_path == "Instant" else weighted_bookable
         forced_date = config.start_date if index == 1 else config.end_date if index == 2 else None
         if status in APPROVAL_LIFECYCLE_STATUSES:
             space_code, requested_start, requested_end = choose_nonconflicting(choices, forced_date)
@@ -291,18 +301,24 @@ def generate_dataset(config: GeneratorConfig, booking_limit: int | None = None) 
         created_at = requested_start - timedelta(days=rng.randint(7, 30), hours=rng.randint(0, 12))
         decision_status = (
             status in APPROVAL_LIFECYCLE_STATUSES | {"Rejected"}
-            or (status == "Cancelled" and (approval_path == "Instant" or index % 2 == 0))
+            or (status == "Cancelled" and (resolution_path == "Instant" or index % 2 == 0))
         )
-        decision_time = created_at + timedelta(hours=rng.randint(2, 48)) if decision_status else None
-        approver_id = rng.choice(active_staff) if decision_status and approval_path == "Staff" else None
-        decision_note = "Generated staff decision" if decision_status and approval_path == "Staff" else "Generated instant decision" if decision_status else None
+        decision_time = (
+            created_at
+            if decision_status and resolution_path == "Instant"
+            else created_at + timedelta(hours=rng.randint(2, 48))
+            if decision_status and resolution_path == "Staff"
+            else None)
+        approver_id = rng.choice(active_staff) if decision_status and resolution_path == "Staff" else None
+        decision_note = "Generated staff decision" if decision_status and resolution_path == "Staff" else None
         rejection_reason = "Usage policy or availability requirements were not met" if status == "Rejected" else None
         capacity = space_by_code[space_code][6]
         participants = rng.randint(1, max(1, min(capacity, int(capacity * rng.uniform(0.25, 1.0)))))
+        requester_id = rng.choice(instant_requesters if resolution_path == "Instant" else requesters)
         bookings.append((
-            index, space_code, rng.choice(requesters), requested_start, requested_end,
+            index, space_code, requester_id, requested_start, requested_end,
             purposes[(index - 1) % len(purposes)], participants, status, created_at,
-            approver_id, decision_time, decision_note, rejection_reason, approval_path,
+            approver_id, decision_time, decision_note, rejection_reason, resolution_path,
         ))
         if status in ("Completed", "Checked In"):
             actual_start = requested_start + timedelta(minutes=rng.choice((-5, 0, 5, 10)))
@@ -394,6 +410,10 @@ def build_connection_string(args: argparse.Namespace, config: GeneratorConfig) -
         f"DATABASE={args.database}", "Encrypt=yes", "TrustServerCertificate=yes",
         "APP=CS486 Step14 G02 Generator",
     ]
+    if args.trusted_connection and args.username:
+        raise ValueError("--trusted-connection and --username are mutually exclusive")
+    if args.password_env and not args.username:
+        raise ValueError("--password-env requires --username")
     if args.username:
         if not args.password_env:
             raise ValueError("--password-env is required with --username")
@@ -416,7 +436,7 @@ def inspect_schema(connection: Any, expected_database: str) -> None:
         "SPACE": {"space_code", "space_name", "space_type", "building", "floor", "room_number", "capacity", "current_status", "usage_policy"},
         "FACILITY": {"facility_id", "facility_name", "facility_description"},
         "SPACE_FACILITY": {"space_code", "facility_id", "quantity", "operation_status", "description"},
-        "BOOKING": {"booking_id", "space_code", "requester_id", "requested_start", "requested_end", "purpose", "expected_participants", "booking_status", "created_at", "approver_id", "decision_time", "decision_note", "rejection_reason", "approval_path", "row_version"},
+        "BOOKING": {"booking_id", "space_code", "requester_id", "requested_start", "requested_end", "purpose", "expected_participants", "booking_status", "created_at", "approver_id", "decision_time", "decision_note", "rejection_reason", "resolution_path"},
         "USAGESESSION": {"booking_id", "check_in_staff_id", "actual_start", "initial_condition", "check_out_staff_id", "actual_end", "final_condition", "usage_notes"},
         "MAINTENANCERECORD": {"maintenance_id", "space_code", "reporter_id", "assigned_staff_id", "problem_type", "problem_description", "start_time", "completion_time", "maintenance_status", "result_note", "impact_level"},
         "BOOKING_ADVISORY_ACK": {"ack_id", "booking_id", "maintenance_id", "acknowledged_at"},
@@ -448,14 +468,62 @@ def inspect_schema(connection: Any, expected_database: str) -> None:
     }
     if actual_identity != expected_identity:
         problems.append(f"identity columns expected {sorted(expected_identity)}, found {sorted(actual_identity)}")
+    expected_constraints = {
+        "PK": {
+            "PK_USER", "PK_SPACE", "PK_FACILITY", "PK_SPACE_FACILITY", "PK_BOOKING",
+            "PK_USAGESESSION", "PK_MAINTENANCERECORD", "PK_BOOKING_ADVISORY_ACK",
+            "PK_MAINTENANCE_IMPACT_HISTORY",
+        },
+        "UQ": {
+            "UQ_USER_EMAIL", "UQ_SPACE_LOCATION", "UQ_FACILITY_NAME",
+            "UQ_BOOKING_MAINTENANCE_ACK",
+        },
+        "FK": {
+            "FK_SPACE_FACILITY_SPACE", "FK_SPACE_FACILITY_FACILITY", "FK_BOOKING_SPACE",
+            "FK_BOOKING_USER_REQUESTER", "FK_BOOKING_USER_APPROVER", "FK_USAGESESSION_BOOKING",
+            "FK_USAGESESSION_USER_CHECKIN", "FK_USAGESESSION_USER_CHECKOUT",
+            "FK_MAINTENANCERECORD_SPACE", "FK_MAINTENANCERECORD_USER_REPORTER",
+            "FK_MAINTENANCERECORD_USER_ASSIGNED", "FK_ACK_BOOKING", "FK_ACK_MAINTENANCE",
+            "FK_HIST_MAINTENANCE", "FK_HIST_USER",
+        },
+        "CK": {
+            "CK_USER_ROLE", "CK_USER_ACCOUNT_STATUS", "CK_SPACE_TYPE", "CK_SPACE_CAPACITY",
+            "CK_SPACE_CURRENT_STATUS", "CK_SPACE_FACILITY_QUANTITY", "CK_SPACE_FACILITY_STATUS",
+            "CK_BOOKING_TIME_ORDER", "CK_BOOKING_PARTICIPANTS", "CK_BOOKING_PURPOSE",
+            "CK_BOOKING_STATUS", "CK_BOOKING_FUTURE_START", "CK_BOOKING_REJECTION_REASON",
+            "CK_BOOKING_CAPACITY_LIMIT", "CK_USAGE_TIME_ORDER", "CK_MAINTENANCE_TIME_ORDER",
+            "CK_MAINTENANCE_STATUS", "CK_MAINTENANCE_PROBLEM_TYPE",
+            "CK_MAINTENANCERECORD_IMPACT_LEVEL", "CK_BOOKING_RESOLUTION_PATH",
+            "CK_HIST_OLD_IMPACT", "CK_HIST_NEW_IMPACT", "CK_HIST_TRANSITION",
+        },
+        "DF": {
+            "DF_SPACE_FACILITY_QUANTITY", "DF_SPACE_FACILITY_STATUS", "DF_BOOKING_CREATED_AT",
+            "DF_MAINTENANCERECORD_IMPACT_LEVEL", "DF_BOOKING_RESOLUTION_PATH",
+            "DF_BOOKING_ADVISORY_ACK_ACKNOWLEDGED_AT",
+            "DF_MAINTENANCE_IMPACT_HISTORY_CHANGED_AT",
+        },
+    }
+    constraint_rows = cursor.execute(
+        "SELECT 'PK', kc.name FROM sys.key_constraints kc WHERE kc.type='PK' "
+        "UNION ALL SELECT 'UQ', kc.name FROM sys.key_constraints kc WHERE kc.type='UQ' "
+        "UNION ALL SELECT 'FK', fk.name FROM sys.foreign_keys fk "
+        "UNION ALL SELECT 'CK', ck.name FROM sys.check_constraints ck "
+        "UNION ALL SELECT 'DF', dc.name FROM sys.default_constraints dc"
+    ).fetchall()
+    actual_constraints: dict[str, set[str]] = defaultdict(set)
+    for constraint_type, constraint_name in constraint_rows:
+        actual_constraints[constraint_type].add(constraint_name)
+    for constraint_type, expected_names in expected_constraints.items():
+        missing_names = sorted(expected_names - actual_constraints[constraint_type])
+        if missing_names:
+            problems.append(f"missing required {constraint_type} constraints {missing_names}")
     required_metadata = {
         ("BOOKING", "booking_id"): ("int", 4, False),
         ("BOOKING", "space_code"): ("varchar", 50, False),
         ("BOOKING", "requested_start"): ("datetime", 8, False),
         ("BOOKING", "requested_end"): ("datetime", 8, False),
         ("BOOKING", "booking_status"): ("varchar", 30, False),
-        ("BOOKING", "approval_path"): ("varchar", 20, False),
-        ("BOOKING", "row_version"): ("timestamp", 8, False),
+        ("BOOKING", "resolution_path"): ("varchar", 20, False),
         ("MAINTENANCERECORD", "maintenance_id"): ("int", 4, False),
         ("MAINTENANCERECORD", "impact_level"): ("varchar", 20, False),
         ("BOOKING_ADVISORY_ACK", "ack_id"): ("int", 4, False),
@@ -515,10 +583,28 @@ def capture_and_disable_triggers(connection: Any) -> list[tuple[str, str]]:
 
 def restore_triggers(connection: Any, triggers: Sequence[tuple[str, str]]) -> None:
     cursor = connection.cursor()
-    for parent, trigger in triggers:
-        schema, table = parent.split(".", 1)
-        cursor.execute(f"ENABLE TRIGGER {_quote_identifier(trigger)} ON {_quote_identifier(schema)}.{_quote_identifier(table)}")
-    connection.commit()
+    recovery_statements: list[str] = []
+    try:
+        for parent, trigger in triggers:
+            schema, table = parent.split(".", 1)
+            statement = f"ENABLE TRIGGER {_quote_identifier(trigger)} ON {_quote_identifier(schema)}.{_quote_identifier(table)}"
+            recovery_statements.append(statement + ";")
+            cursor.execute(statement)
+        connection.commit()
+        remaining_disabled = cursor.execute(
+            "SELECT COUNT_BIG(*) FROM sys.triggers t "
+            "WHERE t.is_disabled=1 AND t.name IN (" + ",".join("?" for _ in triggers) + ")",
+            tuple(trigger for _, trigger in triggers),
+        ).fetchval()
+        if remaining_disabled:
+            raise RuntimeError(f"{remaining_disabled} protected triggers remain disabled")
+    except Exception as exc:
+        connection.rollback()
+        recovery_sql = " ".join(recovery_statements)
+        raise RuntimeError(
+            "CRITICAL: protected trigger restoration failed. Do not use the database until an "
+            f"administrator runs: {recovery_sql} Original error: {exc}"
+        ) from exc
 
 
 def prepare_target(connection: Any, reset: bool, disposable: bool) -> None:
@@ -576,7 +662,7 @@ def load_dataset(connection: Any, dataset: Dataset, batch_size: int) -> None:
         ("SPACE", ("space_code", "space_name", "space_type", "building", "floor", "room_number", "capacity", "current_status", "usage_policy"), dataset.spaces, False),
         ("SPACE_FACILITY", ("space_code", "facility_id", "quantity", "operation_status", "description"), dataset.space_facilities, False),
         ("MAINTENANCERECORD", ("maintenance_id", "space_code", "reporter_id", "assigned_staff_id", "problem_type", "problem_description", "start_time", "completion_time", "maintenance_status", "result_note", "impact_level"), dataset.maintenance, True),
-        ("BOOKING", ("booking_id", "space_code", "requester_id", "requested_start", "requested_end", "purpose", "expected_participants", "booking_status", "created_at", "approver_id", "decision_time", "decision_note", "rejection_reason", "approval_path"), dataset.bookings, True),
+        ("BOOKING", ("booking_id", "space_code", "requester_id", "requested_start", "requested_end", "purpose", "expected_participants", "booking_status", "created_at", "approver_id", "decision_time", "decision_note", "rejection_reason", "resolution_path"), dataset.bookings, True),
         ("USAGESESSION", ("booking_id", "check_in_staff_id", "actual_start", "initial_condition", "check_out_staff_id", "actual_end", "final_condition", "usage_notes"), dataset.usage_sessions, False),
         ("BOOKING_ADVISORY_ACK", ("ack_id", "booking_id", "maintenance_id", "acknowledged_at"), dataset.acknowledgements, True),
         ("MAINTENANCE_IMPACT_HISTORY", ("history_id", "maintenance_id", "old_impact_level", "new_impact_level", "changed_at", "changed_by_user_id"), dataset.impact_history, True),
@@ -609,8 +695,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--server", help="SQL Server host or instance; required for connected dry-run/full load")
     parser.add_argument("--database", help="Target database; University is always refused")
     parser.add_argument("--config", type=Path, default=Path(__file__).with_name("generator_config.json"))
-    parser.add_argument("--trusted-connection", action="store_true", help="Use Windows authentication (default when no username is supplied)")
-    parser.add_argument("--username", help="SQL authentication user")
+    authentication = parser.add_mutually_exclusive_group()
+    authentication.add_argument("--trusted-connection", action="store_true", help="Use Windows authentication (default when no username is supplied)")
+    authentication.add_argument("--username", help="SQL authentication user")
     parser.add_argument("--password-env", help="Environment variable containing the SQL password")
     parser.add_argument("--reset-generated-data", action="store_true", help="Delete project rows only in a verified disposable target")
     parser.add_argument("--allow-non-disposable", action="store_true", help="Explicitly bypass the disposable-name guard; reset remains prohibited")

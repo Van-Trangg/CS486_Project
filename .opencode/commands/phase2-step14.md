@@ -26,11 +26,11 @@ Run this workflow:
 
 1. Inspect the repository and read all baseline files fully.
 2. Generate or update only:
-   - `outputs/14-new-data-generator-G02/generate_data.py`
-   - `outputs/14-new-data-generator-G02/generator_config.json`
-   - `outputs/14-new-data-generator-G02/requirements.txt`
-   - `outputs/14-new-data-generator-G02/README.md`
-   - `outputs/14-new-data-generator-G02/02-validate-data.sql`
+   - `outputs/14-data-generator-G02/generate_data.py`
+   - `outputs/14-data-generator-G02/generator_config.json`
+   - `outputs/14-data-generator-G02/requirements.txt`
+   - `outputs/14-data-generator-G02/README.md`
+   - `outputs/14-data-generator-G02/02-validate-data.sql`
    - Necessary Step 14 helper files
 3. Do not modify earlier approved outputs.
 4. Ensure:

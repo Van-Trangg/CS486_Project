@@ -221,15 +221,23 @@ BEGIN
 END;
 GO
 
--- ------------------------------------------------------------
--- 4.3 Stored Procedure Stub: dbo.sp_ApproveBooking (C08-04, C08-06, P2-BR-07, P2-BR-10)
--- Registers the booking approval stored procedure for Instant (Lecturer/TA) and Staff approval workflows.
--- Note: Full transactional concurrency control (Strict 2PL with UPDLOCK/HOLDLOCK) is implemented in Step 12 (outputs/12-concurrency-implementation-G02.sql).
--- ------------------------------------------------------------
-CREATE OR ALTER PROCEDURE dbo.sp_ApproveBooking
-    @BookingId INT,
-    @ApproverId VARCHAR(50) = NULL,
-    @DecisionNote NVARCHAR(MAX) = NULL
+
+/* ============================================================
+-- 4.3 Stored Procedure Stub: dbo.sp_SubmitBooking (C08-04, C08-06, P2-BR-07, P2-BR-10)
+   Booking submission and resolution-path assignment
+
+   NOTE:
+   This is intentionally NOT concurrency-safe.
+   Step 12 will upgrade this procedure with:
+   - explicit transaction
+   - per-space UPDLOCK, HOLDLOCK
+   - fresh booking-conflict check
+   - Out-of-Service maintenance check
+   - advisory acknowledgement validation
+   ============================================================ */
+
+CREATE OR ALTER PROCEDURE dbo.sp_SubmitBooking
+    @BookingId INT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -238,19 +246,65 @@ BEGIN
     BEGIN
         RAISERROR('BookingId is required.', 16, 1);
         RETURN;
-    END
+    END;
 
-    UPDATE dbo.BOOKING
-    SET booking_status = 'Approved',
-        approver_id = @ApproverId,
-        decision_time = GETDATE(),
-        decision_note = @DecisionNote
-    WHERE booking_id = @BookingId
-      AND booking_status = 'Pending';
+    /* Booking must exist and still be pending */
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM dbo.BOOKING
+        WHERE booking_id = @BookingId
+          AND booking_status = 'Pending'
+    )
+    BEGIN
+        RAISERROR('Booking does not exist or is not Pending.', 16, 1);
+        RETURN;
+    END;
+
+    /*
+       Phase 2 resolution policy:
+
+       Lecturer / Teaching Assistant + Classroom
+       -> Instant
+
+       All other requests
+       -> Staff
+    */
+    IF EXISTS
+    (
+        SELECT 1
+        FROM dbo.BOOKING AS b
+        JOIN dbo.[USER] AS u
+            ON u.user_id = b.requester_id
+        JOIN dbo.SPACE AS s
+            ON s.space_code = b.space_code
+        WHERE b.booking_id = @BookingId
+          AND u.role IN ('Lecturer', 'Teaching Assistant')
+          AND s.space_type = 'Classroom'
+    )
+    BEGIN
+        UPDATE dbo.BOOKING
+        SET
+            resolution_path = 'Instant',
+            booking_status = 'Approved',
+            approver_id = NULL,
+            decision_time = GETDATE(),
+            decision_note = 'Automatically resolved at submission.'
+        WHERE booking_id = @BookingId
+          AND booking_status = 'Pending';
+    END
+    ELSE
+    BEGIN
+        UPDATE dbo.BOOKING
+        SET
+            resolution_path = 'Staff'
+        WHERE booking_id = @BookingId
+          AND booking_status = 'Pending';
+    END;
 END;
 GO
 
-PRINT 'Stored Procedure stub dbo.sp_ApproveBooking registered successfully.';
+PRINT 'Placeholder procedure dbo.sp_SubmitBooking registered successfully.';
 GO
 
 -- ============================================================

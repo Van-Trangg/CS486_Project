@@ -12,11 +12,15 @@ Use the Step 13 review skill in:
 
 Treat the latest approved concurrency design, implementation, and migrated schema as the testing baseline, especially:
 
+- `req/business-requirement-phase2.md`
+- `outputs/01-business-req-analysis-G02.md`
+- `outputs/03-logical-design-G02.md`
+- `outputs/05-db-definition-G02.sql`
 - `outputs/09-updated-erd-and-logical-design-G02.md`
 - `outputs/10-schema-migration-G02.sql`
 - `outputs/11-concurrency-design-G02.md`
 - `outputs/12-concurrency-implementation-G02.sql`
-- `docs/12-concurrency-implementation-review-G02.md`
+- `docs/13-concurrency-tests-review-G02.md`
 - Relevant review files under `docs/`
 
 Use `$ARGUMENTS` only as optional additional instructions from the user. Do not treat it as a replacement for the approved project artifacts.

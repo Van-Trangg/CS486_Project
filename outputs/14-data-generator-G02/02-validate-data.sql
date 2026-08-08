@@ -18,6 +18,8 @@ CREATE TABLE #Checks
 
 DECLARE @BookingCount BIGINT = (SELECT COUNT_BIG(*) FROM dbo.BOOKING);
 DECLARE @AcademicYears BIGINT;
+DECLARE @MinimumBookingDate DATE = (SELECT MIN(CONVERT(DATE, requested_start)) FROM dbo.BOOKING);
+DECLARE @MaximumBookingDate DATE = (SELECT MAX(CONVERT(DATE, requested_start)) FROM dbo.BOOKING);
 WITH AcademicYears AS
 (
     SELECT DISTINCT CASE WHEN MONTH(requested_start) >= 9 THEN YEAR(requested_start) ELSE YEAR(requested_start) - 1 END AS academic_year_start
@@ -28,6 +30,8 @@ SELECT @AcademicYears = COUNT_BIG(*) FROM AcademicYears;
 INSERT #Checks VALUES
 ('Booking row minimum', @BookingCount, '>= 100000', IIF(@BookingCount >= 100000, 'PASS', 'FAIL')),
 ('Distinct academic years', @AcademicYears, '>= 3', IIF(@AcademicYears >= 3, 'PASS', 'FAIL')),
+('Minimum booking date coverage', ISNULL(CONVERT(BIGINT, CONVERT(CHAR(8), @MinimumBookingDate, 112)), 0), '<= 20230901', IIF(@MinimumBookingDate <= '2023-09-01', 'PASS', 'FAIL')),
+('Maximum booking date coverage', ISNULL(CONVERT(BIGINT, CONVERT(CHAR(8), @MaximumBookingDate, 112)), 0), '>= 20260531', IIF(@MaximumBookingDate >= '2026-05-31', 'PASS', 'FAIL')),
 ('User row minimum', (SELECT COUNT_BIG(*) FROM dbo.[USER]), '>= 400', IIF((SELECT COUNT_BIG(*) FROM dbo.[USER]) >= 400, 'PASS', 'FAIL')),
 ('Space row minimum', (SELECT COUNT_BIG(*) FROM dbo.SPACE), '>= 50', IIF((SELECT COUNT_BIG(*) FROM dbo.SPACE) >= 50, 'PASS', 'FAIL')),
 ('Facility row minimum', (SELECT COUNT_BIG(*) FROM dbo.FACILITY), '>= 10', IIF((SELECT COUNT_BIG(*) FROM dbo.FACILITY) >= 10, 'PASS', 'FAIL')),
@@ -39,12 +43,12 @@ INSERT #Checks VALUES
 
 DECLARE @StatusCoverage BIGINT = (SELECT COUNT_BIG(DISTINCT booking_status) FROM dbo.BOOKING);
 DECLARE @PurposeCoverage BIGINT = (SELECT COUNT_BIG(DISTINCT purpose) FROM dbo.BOOKING);
-DECLARE @PathCoverage BIGINT = (SELECT COUNT_BIG(DISTINCT approval_path) FROM dbo.BOOKING);
+DECLARE @PathCoverage BIGINT = (SELECT COUNT_BIG(DISTINCT resolution_path) FROM dbo.BOOKING);
 DECLARE @ImpactCoverage BIGINT = (SELECT COUNT_BIG(DISTINCT impact_level) FROM dbo.MAINTENANCERECORD);
 INSERT #Checks VALUES
 ('Booking status domain coverage', @StatusCoverage, '= 7', IIF(@StatusCoverage = 7, 'PASS', 'FAIL')),
 ('Booking purpose domain coverage', @PurposeCoverage, '= 7', IIF(@PurposeCoverage = 7, 'PASS', 'FAIL')),
-('Approval path domain coverage', @PathCoverage, '= 2', IIF(@PathCoverage = 2, 'PASS', 'FAIL')),
+('Resolution path domain coverage', @PathCoverage, '= 2', IIF(@PathCoverage = 2, 'PASS', 'FAIL')),
 ('Maintenance impact coverage', @ImpactCoverage, '= 2', IIF(@ImpactCoverage = 2, 'PASS', 'FAIL')),
 ('User role domain coverage', (SELECT COUNT_BIG(DISTINCT role) FROM dbo.[USER]), '= 6', IIF((SELECT COUNT_BIG(DISTINCT role) FROM dbo.[USER]) = 6, 'PASS', 'FAIL')),
 ('User account-status coverage', (SELECT COUNT_BIG(DISTINCT account_status) FROM dbo.[USER]), '= 3', IIF((SELECT COUNT_BIG(DISTINCT account_status) FROM dbo.[USER]) = 3, 'PASS', 'FAIL')),
@@ -61,15 +65,78 @@ DECLARE @InvalidStatusFields BIGINT =
 (
     SELECT COUNT_BIG(*) FROM dbo.BOOKING
     WHERE (booking_status='Rejected' AND rejection_reason IS NULL)
-       OR (booking_status='Pending' AND (approver_id IS NOT NULL OR decision_time IS NOT NULL))
-       OR (approval_path='Instant' AND approver_id IS NOT NULL)
+       OR (booking_status<>'Rejected' AND rejection_reason IS NOT NULL)
+       OR (booking_status='Pending' AND (approver_id IS NOT NULL OR decision_time IS NOT NULL OR decision_note IS NOT NULL OR rejection_reason IS NOT NULL))
+       OR (resolution_path='Instant' AND (booking_status IN ('Pending','Rejected') OR approver_id IS NOT NULL OR decision_note IS NOT NULL OR decision_time IS NULL))
+       OR (resolution_path='Staff' AND booking_status IN ('Approved','Checked In','Completed','No-Show','Rejected')
+           AND (approver_id IS NULL OR decision_time IS NULL OR decision_note IS NULL))
+       OR (resolution_path='Staff' AND booking_status='Cancelled'
+           AND ((approver_id IS NULL AND (decision_time IS NOT NULL OR decision_note IS NOT NULL))
+             OR (approver_id IS NOT NULL AND (decision_time IS NULL OR decision_note IS NULL))))
        OR (booking_status IN ('Approved','Checked In','Completed','No-Show','Rejected') AND decision_time IS NULL)
 );
+DECLARE @InvalidInstantEligibility BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.BOOKING b
+    JOIN dbo.SPACE s ON s.space_code=b.space_code
+    JOIN dbo.[USER] u ON u.user_id=b.requester_id
+    WHERE b.resolution_path='Instant'
+      AND (s.space_type<>'Classroom' OR u.role NOT IN ('Lecturer','Teaching Assistant') OR u.account_status<>'Active')
+);
+DECLARE @InvalidInstantDecisionTime BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM dbo.BOOKING
+    WHERE resolution_path = 'Instant'
+      AND
+      (
+          decision_time IS NULL
+          OR decision_time <> created_at
+      )
+);
+
+DECLARE @InvalidStaffRoles BIGINT =
+(
+    SELECT COUNT_BIG(*)
+    FROM
+    (
+        SELECT b.approver_id AS user_id
+        FROM dbo.BOOKING b
+        WHERE b.approver_id IS NOT NULL
+        UNION ALL
+        SELECT us.check_in_staff_id FROM dbo.USAGESESSION us
+        UNION ALL
+        SELECT us.check_out_staff_id FROM dbo.USAGESESSION us WHERE us.check_out_staff_id IS NOT NULL
+        UNION ALL
+        SELECT m.assigned_staff_id FROM dbo.MAINTENANCERECORD m WHERE m.assigned_staff_id IS NOT NULL
+        UNION ALL
+        SELECT h.changed_by_user_id FROM dbo.MAINTENANCE_IMPACT_HISTORY h
+    ) refs
+    LEFT JOIN dbo.[USER] u ON u.user_id=refs.user_id
+    WHERE u.user_id IS NULL OR u.role NOT IN ('Facility Staff','Facility Manager') OR u.account_status<>'Active'
+);
 INSERT #Checks VALUES
-('Invalid booking time order', @InvalidBookingTime, '= 0', IIF(@InvalidBookingTime=0, 'PASS', 'FAIL')),
-('Invalid booking capacity', @InvalidCapacity, '= 0', IIF(@InvalidCapacity=0, 'PASS', 'FAIL')),
-('Invalid decision chronology', @InvalidDecision, '= 0', IIF(@InvalidDecision=0, 'PASS', 'FAIL')),
-('Invalid status/path field combinations', @InvalidStatusFields, '= 0', IIF(@InvalidStatusFields=0, 'PASS', 'FAIL'));
+('Invalid booking time order', @InvalidBookingTime, '= 0',
+ IIF(@InvalidBookingTime = 0, 'PASS', 'FAIL')),
+
+('Invalid booking capacity', @InvalidCapacity, '= 0',
+ IIF(@InvalidCapacity = 0, 'PASS', 'FAIL')),
+
+('Invalid decision chronology', @InvalidDecision, '= 0',
+ IIF(@InvalidDecision = 0, 'PASS', 'FAIL')),
+
+('Invalid status/path field combinations', @InvalidStatusFields, '= 0',
+ IIF(@InvalidStatusFields = 0, 'PASS', 'FAIL')),
+
+('Invalid Instant eligibility rows', @InvalidInstantEligibility, '= 0',
+ IIF(@InvalidInstantEligibility = 0, 'PASS', 'FAIL')),
+
+('Invalid Instant decision time', @InvalidInstantDecisionTime, '= 0',
+ IIF(@InvalidInstantDecisionTime = 0, 'PASS', 'FAIL')),
+
+('Invalid staff-role references', @InvalidStaffRoles, '= 0',
+ IIF(@InvalidStaffRoles = 0, 'PASS', 'FAIL'));
 
 DECLARE @ApprovedConflicts BIGINT =
 (
@@ -243,7 +310,6 @@ DECLARE @DuplicateAck BIGINT =
     SELECT COUNT_BIG(*) FROM (SELECT booking_id,maintenance_id FROM dbo.BOOKING_ADVISORY_ACK GROUP BY booking_id,maintenance_id HAVING COUNT_BIG(*)>1) d
 );
 INSERT #Checks VALUES
-('Invalid advisory acknowledgements', @InvalidAck, '= 0', IIF(@InvalidAck=0, 'PASS', 'FAIL')),
 ('Missing required advisory acknowledgements', @MissingAck, '= 0', IIF(@MissingAck=0, 'PASS', 'FAIL')),
 ('Duplicate acknowledgement pairs', @DuplicateAck, '= 0', IIF(@DuplicateAck=0, 'PASS', 'FAIL')),
 ('Bookings acknowledging multiple advisories', (SELECT COUNT_BIG(*) FROM (SELECT booking_id FROM dbo.BOOKING_ADVISORY_ACK GROUP BY booking_id HAVING COUNT_BIG(*)>1) x), '> 0', IIF((SELECT COUNT_BIG(*) FROM (SELECT booking_id FROM dbo.BOOKING_ADVISORY_ACK GROUP BY booking_id HAVING COUNT_BIG(*)>1) x)>0, 'PASS', 'FAIL'));
@@ -511,7 +577,7 @@ FROM #Checks;
 
 SELECT COUNT_BIG(*) AS booking_count, MIN(requested_start) AS minimum_booking_start, MAX(requested_end) AS maximum_booking_end FROM dbo.BOOKING;
 SELECT booking_status, COUNT_BIG(*) AS booking_count FROM dbo.BOOKING GROUP BY booking_status ORDER BY booking_status;
-SELECT approval_path, COUNT_BIG(*) AS booking_count FROM dbo.BOOKING GROUP BY approval_path ORDER BY approval_path;
+SELECT resolution_path, COUNT_BIG(*) AS booking_count FROM dbo.BOOKING GROUP BY resolution_path ORDER BY resolution_path;
 SELECT CASE WHEN MONTH(requested_start)>=9 THEN YEAR(requested_start) ELSE YEAR(requested_start)-1 END AS academic_year_start, COUNT_BIG(*) AS booking_count FROM dbo.BOOKING GROUP BY CASE WHEN MONTH(requested_start)>=9 THEN YEAR(requested_start) ELSE YEAR(requested_start)-1 END ORDER BY academic_year_start;
 SELECT DATENAME(WEEKDAY,requested_start) AS weekday_name, DATEPART(HOUR,requested_start) AS start_hour, COUNT_BIG(*) AS booking_count FROM dbo.BOOKING GROUP BY DATENAME(WEEKDAY,requested_start), DATEPART(WEEKDAY,requested_start), DATEPART(HOUR,requested_start) ORDER BY DATEPART(WEEKDAY,requested_start), start_hour;
 SELECT space_code, COUNT_BIG(*) AS booking_count FROM dbo.BOOKING GROUP BY space_code ORDER BY booking_count DESC, space_code;

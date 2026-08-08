@@ -10,16 +10,59 @@ Use this skill after the Phase 2 schema migration is complete and the user asks 
 
 Python is responsible for generating realistic data and inserting it in batches. SQL Server remains responsible for constraints, integrity enforcement, analytical queries, and final validation.
 
+## Existing Artifact Update Policy
+
+Before creating any Step artifact, check whether the required output artifact or output directory already exists.
+
+### When an artifact already exists
+
+If the required Step artifact already exists:
+
+1. **Update the existing artifact in place.**
+2. Treat the current artifact as the baseline rather than creating a replacement.
+3. Preserve all existing valid:
+   - files,
+   - test cases or generation logic,
+   - comments,
+   - naming conventions,
+   - directory structure,
+   - configuration,
+   - documentation,
+   - and previously correct behavior.
+4. Modify only the parts affected by the latest upstream design, schema, implementation, or review findings.
+5. Add missing coverage or logic only when required.
+6. Do not duplicate functionality that the existing artifact already provides correctly.
+7. Remove or rewrite existing content only when it is incompatible with the finalized upstream implementation or current requirements.
+8. Keep the existing output path and filenames unless an upstream schema change makes a filename genuinely invalid.
+9. Do not create parallel artifacts such as:
+   - `new-*`
+   - `updated-*`
+   - `revised-*`
+   - `*-v2`
+   - duplicate Step directories
+   when the required artifact already exists.
+10. Before finishing, review the complete updated artifact to ensure that unchanged content still remains compatible with the latest upstream steps.
+
+### Step-specific application
+
+- **Step 13:** If `outputs/13-concurrency-tests-G02/` already exists, update the existing test package to match the finalized Step 12 procedures, parameters, permissions, locking rules, integrity rules, and protected workflows. Preserve valid existing concurrency tests and add or revise only the affected scenarios.
+
+- **Step 14:** If `outputs/14-data-generator-G02/` already exists, update the existing generator package to match the finalized schema and Phase 2 rules. Preserve valid generator logic, configuration, validation SQL, and documentation, and modify only the portions affected by upstream changes.
+
+### When no artifact exists
+
+Only create the required Step artifact from scratch when the expected artifact or output directory does not already exist.
+
 ## Required output directory
 
 Create or update:
 
-`outputs/14-new-data-generator-G02/`
+`outputs/14-data-generator-G02/`
 
 Required files:
 
 ```text
-outputs/14-new-data-generator-G02/
+outputs/14-data-generator-G02/
 ├── generate_data.py
 ├── generator_config.json
 ├── requirements.txt

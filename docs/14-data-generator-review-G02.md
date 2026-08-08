@@ -1,6 +1,6 @@
 # 1. Review Summary
 
-**Package reviewed:** `outputs/14-new-data-generator-G02/`, including every required package file.
+**Package reviewed:** `outputs/14-data-generator-G02/`, including every required package file.
 
 **Review type:** Static package review using supplied runtime validation evidence for database `Step14ReviewG02_20260805`. The generator, dry-run, validation SQL, and database lifecycle operations were not rerun, as explicitly prohibited. A Python AST parse was used for a non-executing syntax check.
 
@@ -16,11 +16,11 @@
 
 - `.opencode/skills/14-data-generator/new-SKILL.md`
 - `.opencode/skills/14-data-generator/new-review-SKILL.md`
-- `outputs/14-new-data-generator-G02/generate_data.py`
-- `outputs/14-new-data-generator-G02/generator_config.json`
-- `outputs/14-new-data-generator-G02/requirements.txt`
-- `outputs/14-new-data-generator-G02/README.md`
-- `outputs/14-new-data-generator-G02/02-validate-data.sql`
+- `outputs/14-data-generator-G02/generate_data.py`
+- `outputs/14-data-generator-G02/generator_config.json`
+- `outputs/14-data-generator-G02/requirements.txt`
+- `outputs/14-data-generator-G02/README.md`
+- `outputs/14-data-generator-G02/02-validate-data.sql`
 - `req/business-requirement-phase2.md`
 - `outputs/03-logical-design-G02.md`
 - `outputs/05-db-definition-G02.sql`

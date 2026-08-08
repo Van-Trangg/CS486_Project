@@ -70,7 +70,8 @@ python generate_data.py --server localhost --database Step14ReviewG02 --username
 ## Generated Coverage
 
 - Booking dates from 2023-09-01 through 2026-05-31, spanning three academic years
-- All seven booking statuses and both approval paths
+- All seven booking statuses and both resolution paths
+- Instant rows use Classroom spaces and active Lecturer or Teaching Assistant requesters, matching Step 12
 - Weighted Fall/Spring, weekday, peak-hour, and popular-space demand
 - Six space types, five current statuses, varied capacity, and varied facility combinations
 - Advisory and out-of-service maintenance, overlapping active advisories, and open/completed records
@@ -79,11 +80,11 @@ python generate_data.py --server localhost --database Step14ReviewG02 --username
 - Usage sessions for every `Completed` and `Checked In` booking
 - No overlapping approved-lifecycle bookings on the same space under half-open interval rules
 
-Identity values are inserted explicitly so the same seed/configuration produces stable foreign-key relationships. SQL Server `row_version` values remain server-generated and may differ.
+Identity values are inserted explicitly so the same seed/configuration produces stable foreign-key relationships.
 
 ## Loading Behavior
 
-The generator checks the selected database context and exact migrated columns before writing. It keeps foreign keys and check constraints enabled, temporarily disables only currently enabled triggers on `BOOKING`, `MAINTENANCERECORD`, and `USAGESESSION`, and restores those trigger states in `finally`. Inserts use `pyodbc.fast_executemany`, configurable batches, per-batch commits, rollback on batch failure, and progress output.
+The generator checks the selected database context, exact migrated columns, identities, and required named keys/constraints/defaults before writing. It keeps foreign keys and check constraints enabled, temporarily disables only currently enabled triggers on `BOOKING`, `MAINTENANCERECORD`, and `USAGESESSION`, and restores and verifies those trigger states in `finally`. A restoration failure prints administrator recovery SQL and makes the run fail. Inserts use `pyodbc.fast_executemany`, configurable batches, per-batch commits, rollback on batch failure, and progress output.
 
 A failed load can leave committed earlier batches. Re-run only with `--reset-generated-data` against the same disposable database.
 

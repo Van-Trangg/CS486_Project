@@ -13,6 +13,15 @@
    session demonstrations are intentionally deferred to Step 13.
    ========================================================= */
 
+/* Step 12 update:
+   - Converts sp_SubmitBooking into the sole protected booking-creation path.
+   - Derives resolution_path once at INSERT and immediately invokes the
+     protected approval path for eligible Instant submissions.
+   - Records the exact applicable advisory acknowledgement set atomically.
+   - Closes direct BOOKING INSERT and protected-column write bypasses.
+   - Restores Approved + Checked In occupancy semantics while preserving the
+     approved per-space lock protocol for submission, approval, and escalation. */
+
 USE University;
 GO
 /* =========================================================
@@ -35,14 +44,14 @@ GO
    1. Implementation assumptions and object mapping
 
    BOOKING: booking_id, space_code, requested_start, requested_end,
-            booking_status, approval_path, approver_id, decision_time,
+            booking_status, resolution_path, approver_id, decision_time,
             decision_note
    MAINTENANCERECORD: maintenance_id, space_code, start_time,
             completion_time, maintenance_status, impact_level
 
-   Every transition of BOOKING.booking_status to Approved must call
-   dbo.sp_ApproveBooking. Direct updates bypass the lock protocol and
-   are prohibited by the access policy in section 4.
+   dbo.sp_SubmitBooking is the sole normal BOOKING insert path, and every
+   transition of BOOKING.booking_status to Approved must call
+   dbo.sp_ApproveBooking. Direct writes are prohibited by section 5.
    ========================================================= */
 
 IF OBJECT_ID('dbo.SPACE', 'U') IS NULL
@@ -69,7 +78,7 @@ BEGIN
         SELECT 1
         FROM inserted AS i
         JOIN dbo.SPACE AS s ON s.space_code = i.space_code
-        WHERE i.booking_status = 'Approved'
+        WHERE i.booking_status IN ('Approved', 'Checked In')
           AND
           (
               s.current_status IN ('Retired', 'Temporarily Closed')
@@ -79,7 +88,7 @@ BEGIN
                   FROM dbo.BOOKING AS b
                   WHERE b.space_code = i.space_code
                     AND b.booking_id <> i.booking_id
-                    AND b.booking_status = 'Approved'
+                    AND b.booking_status IN ('Approved', 'Checked In')
                     AND b.requested_start < i.requested_end
                     AND b.requested_end > i.requested_start
               )
@@ -106,10 +115,239 @@ GO
    change with approval; the Phase 1 bidirectional-overlap trigger would
    reject the required escalation and is therefore removed. */
 DROP TRIGGER IF EXISTS dbo.TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP;
+DROP TRIGGER IF EXISTS dbo.TR_BOOKING_LOCK_APPROVED_FIELDS;
+GO
+CREATE OR ALTER TRIGGER dbo.TR_BOOKING_LOCK_SUBMISSION_FACTS
+ON dbo.BOOKING
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM inserted AS i
+        JOIN deleted AS d
+            ON d.booking_id = i.booking_id
+        WHERE
+               i.requester_id <> d.requester_id
+            OR i.space_code <> d.space_code
+            OR i.requested_start <> d.requested_start
+            OR i.requested_end <> d.requested_end
+    )
+    BEGIN
+        THROW 51070,
+            'Requester, space, and requested period cannot be changed after booking submission.',
+            1;
+    END;
+END;
 GO
 
 /* =========================================================
-   2. Protected booking approval procedure
+   2. Protected booking submission procedure
+
+   The application supplies booking facts and the complete set of advisories
+   it presented. This procedure locks SPACE before inserting BOOKING, derives
+   resolution_path from authoritative data, records acknowledgements, and
+   immediately invokes the protected approval path for Instant submissions.
+   ========================================================= */
+IF TYPE_ID(N'dbo.BookingAdvisoryAckListType') IS NULL
+BEGIN
+    EXEC(N'CREATE TYPE dbo.BookingAdvisoryAckListType AS TABLE
+    (
+        maintenance_id INT NOT NULL PRIMARY KEY
+    );');
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_SubmitBooking
+    @RequesterId VARCHAR(50),
+    @SpaceCode VARCHAR(50),
+    @RequestedStart DATETIME,
+    @RequestedEnd DATETIME,
+    @Purpose VARCHAR(100),
+    @ExpectedParticipants INT,
+    @Acknowledgements dbo.BookingAdvisoryAckListType READONLY,
+    @BookingId INT = NULL OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @LockedSpaceCode VARCHAR(50);
+    DECLARE @CurrentSpaceStatus VARCHAR(30);
+    DECLARE @SpaceType VARCHAR(50);
+    DECLARE @UsagePolicy NVARCHAR(MAX);
+    DECLARE @Capacity INT;
+    DECLARE @RequesterRole VARCHAR(50);
+    DECLARE @RequesterStatus VARCHAR(20);
+    DECLARE @ResolutionPath VARCHAR(20);
+    DECLARE @CreatedAt DATETIME;
+    DECLARE @HasApprovedOverlap BIT = 0;
+    DECLARE @HasOutOfServiceOverlap BIT = 0;
+
+    IF @RequesterId IS NULL OR @SpaceCode IS NULL
+       OR @RequestedStart IS NULL OR @RequestedEnd IS NULL
+       OR @Purpose IS NULL OR @ExpectedParticipants IS NULL
+        THROW 51041, 'Requester, space, time range, purpose, and participant count are required.', 1;
+
+    IF @@TRANCOUNT <> 0
+        THROW 51042, 'sp_SubmitBooking cannot run inside a caller transaction.', 1;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        SELECT
+            @LockedSpaceCode = s.space_code,
+            @CurrentSpaceStatus = s.current_status,
+            @SpaceType = s.space_type,
+            @UsagePolicy = s.usage_policy,
+            @Capacity = s.capacity
+        FROM dbo.SPACE AS s WITH (UPDLOCK, HOLDLOCK)
+        WHERE s.space_code = @SpaceCode;
+
+        IF @LockedSpaceCode IS NULL
+            THROW 51044, 'Space not found.', 1;
+
+        SELECT
+            @RequesterRole = u.role,
+            @RequesterStatus = u.account_status
+        FROM dbo.[USER] AS u
+        WHERE u.user_id = @RequesterId;
+
+        IF @RequesterRole IS NULL
+            THROW 51043, 'Requester not found.', 1;
+
+        IF @RequesterStatus <> 'Active'
+            THROW 51047, 'Only an active requester may submit a booking.', 1;
+
+        IF @RequestedStart >= @RequestedEnd OR @ExpectedParticipants <= 0
+            THROW 51048, 'Booking time range or participant count is invalid.', 1;
+
+        SET @CreatedAt = GETDATE();
+
+        IF @RequestedStart < @CreatedAt
+            THROW 51049, 'The requested start must not be earlier than booking creation.', 1;
+
+        IF @ExpectedParticipants > @Capacity
+            THROW 51050, 'Expected participants exceed the space capacity.', 1;
+
+        /* The caller-provided set must exactly equal the authoritative active
+           overlapping advisory set after the SPACE lock is held. */
+        IF EXISTS
+        (
+            SELECT 1
+            FROM dbo.MAINTENANCERECORD AS m
+            WHERE m.space_code = @LockedSpaceCode
+              AND m.maintenance_status IN ('Reported', 'In Progress')
+              AND m.impact_level = 'advisory'
+              AND m.start_time < @RequestedEnd
+              AND ISNULL(m.completion_time, CONVERT(DATETIME, '9999-12-31', 120)) > @RequestedStart
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM @Acknowledgements AS a
+                  WHERE a.maintenance_id = m.maintenance_id
+              )
+        )
+            THROW 51051, 'Every active overlapping advisory must be acknowledged at submission.', 1;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM @Acknowledgements AS a
+            LEFT JOIN dbo.MAINTENANCERECORD AS m
+              ON m.maintenance_id = a.maintenance_id
+             AND m.space_code = @LockedSpaceCode
+             AND m.maintenance_status IN ('Reported', 'In Progress')
+             AND m.impact_level = 'advisory'
+             AND m.start_time < @RequestedEnd
+             AND ISNULL(m.completion_time, CONVERT(DATETIME, '9999-12-31', 120)) > @RequestedStart
+            WHERE m.maintenance_id IS NULL
+        )
+            THROW 51052, 'Booking contains an acknowledgement for a non-applicable advisory.', 1;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM dbo.MAINTENANCERECORD AS m
+            WHERE m.space_code = @LockedSpaceCode
+              AND m.maintenance_status IN ('Reported', 'In Progress')
+              AND m.impact_level = 'out-of-service'
+              AND m.start_time < @RequestedEnd
+              AND ISNULL(m.completion_time, CONVERT(DATETIME, '9999-12-31', 120)) > @RequestedStart
+        )
+            SET @HasOutOfServiceOverlap = 1;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM dbo.BOOKING AS b
+            WHERE b.space_code = @LockedSpaceCode
+              AND b.booking_status IN ('Approved', 'Checked In')
+              AND b.requested_start < @RequestedEnd
+              AND b.requested_end > @RequestedStart
+        )
+            SET @HasApprovedOverlap = 1;
+
+        /* usage_policy remains unstructured Phase 1 text. No executable text
+           grammar is approved, so only approved machine-evaluable rules are
+           applied here. A request that cannot be approved now follows Staff. */
+        IF @SpaceType = 'Classroom'
+           AND @RequesterRole IN ('Lecturer', 'Teaching Assistant')
+           AND @CurrentSpaceStatus NOT IN ('Retired', 'Temporarily Closed')
+           AND @HasApprovedOverlap = 0
+           AND @HasOutOfServiceOverlap = 0
+            SET @ResolutionPath = 'Instant';
+        ELSE
+            SET @ResolutionPath = 'Staff';
+
+        INSERT INTO dbo.BOOKING
+            (space_code, requester_id, requested_start, requested_end, purpose,
+             expected_participants, booking_status, created_at, approver_id,
+             decision_time, decision_note, rejection_reason, resolution_path)
+        VALUES
+            (@LockedSpaceCode, @RequesterId, @RequestedStart, @RequestedEnd,
+             @Purpose, @ExpectedParticipants, 'Pending', @CreatedAt, NULL,
+             NULL, NULL, NULL, @ResolutionPath);
+
+        SET @BookingId = CONVERT(INT, SCOPE_IDENTITY());
+
+        INSERT INTO dbo.BOOKING_ADVISORY_ACK
+            (booking_id, maintenance_id, acknowledged_at)
+        SELECT
+            @BookingId,
+            a.maintenance_id,
+            @CreatedAt
+        FROM @Acknowledgements AS a;
+
+        IF @ResolutionPath = 'Instant'
+        BEGIN
+            EXEC dbo.sp_ApproveBooking
+                @BookingId = @BookingId,
+                @ApproverId = NULL,
+                @DecisionNote = NULL;
+        END;
+
+        COMMIT TRANSACTION;
+
+        SELECT
+            @BookingId AS booking_id,
+            @ResolutionPath AS resolution_path,
+            CASE WHEN @ResolutionPath = 'Instant' THEN 'Approved' ELSE 'Pending' END AS booking_status;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0
+            ROLLBACK TRANSACTION;
+        SET @BookingId = NULL;
+        THROW;
+    END CATCH;
+END;
+GO
+
+/* =========================================================
+   3. Protected booking approval procedure
    ========================================================= */
 CREATE OR ALTER PROCEDURE dbo.sp_ApproveBooking
     @BookingId INT,
@@ -122,24 +360,16 @@ BEGIN
 
     DECLARE @SpaceCode VARCHAR(50);
     DECLARE @LockedSpaceCode VARCHAR(50);
-    DECLARE @CurrentSpaceStatus VARCHAR(30);  -- Added
+    DECLARE @CurrentSpaceStatus VARCHAR(30);
     DECLARE @RequestedStart DATETIME;
     DECLARE @RequestedEnd DATETIME;
+    DECLARE @CreatedAt DATETIME;
     DECLARE @BookingStatus VARCHAR(30);
-    DECLARE @ApprovalPath VARCHAR(20);
+    DECLARE @ResolutionPath VARCHAR(20);
+    DECLARE @StartedTransaction BIT = 0;
 
     IF @BookingId IS NULL
         THROW 51002, 'BookingId is required.', 1;
-
-    /*
-        This procedure owns its short transaction.
-        Calling it from an outer transaction could retain the per-space
-        lock beyond this procedure.
-    */
-    IF @@TRANCOUNT <> 0
-        THROW 51021,
-              'sp_ApproveBooking cannot run inside a caller transaction.',
-              1;
 
     /*
         This non-locking lookup identifies the per-space lock target.
@@ -153,7 +383,15 @@ BEGIN
         THROW 51003, 'Booking not found.', 1;
 
     BEGIN TRY
-        BEGIN TRANSACTION;
+        IF @@TRANCOUNT = 0
+        BEGIN
+            BEGIN TRANSACTION;
+            SET @StartedTransaction = 1;
+        END
+        ELSE
+        BEGIN
+            SAVE TRANSACTION sp_ApproveBookingSave;
+        END;
 
         /*
             Strict 2PL serialization point.
@@ -188,8 +426,9 @@ BEGIN
             @SpaceCode = b.space_code,
             @RequestedStart = b.requested_start,
             @RequestedEnd = b.requested_end,
+            @CreatedAt = b.created_at,
             @BookingStatus = b.booking_status,
-            @ApprovalPath = b.approval_path
+            @ResolutionPath = b.resolution_path
         FROM dbo.BOOKING AS b
         WHERE b.booking_id = @BookingId;
 
@@ -207,7 +446,7 @@ BEGIN
         IF @RequestedStart >= @RequestedEnd
             THROW 51007, 'Booking time range is invalid.', 1;
 
-        IF @ApprovalPath = 'Staff'
+        IF @ResolutionPath = 'Staff'
         BEGIN
             IF @ApproverId IS NULL
                 THROW 51008,
@@ -227,17 +466,22 @@ BEGIN
                       'Approver must be an active Facility Staff or Facility Manager user.',
                       1;
         END
-        ELSE IF @ApprovalPath = 'Instant'
+        ELSE IF @ResolutionPath = 'Instant'
         BEGIN
             IF @ApproverId IS NOT NULL
                 THROW 51010,
                       'Instant approval must not specify an approver.',
                       1;
+
+            IF @DecisionNote IS NOT NULL
+                THROW 51023,
+                      'Instant approval must not specify a staff decision note.',
+                      1;
         END
         ELSE
         BEGIN
             THROW 51011,
-                  'Booking has an invalid approval path.',
+                  'Booking has an invalid resolution path.',
                   1;
         END;
 
@@ -247,12 +491,12 @@ BEGIN
             FROM dbo.BOOKING AS b
             WHERE b.space_code = @LockedSpaceCode
               AND b.booking_id <> @BookingId
-              AND b.booking_status = 'Approved'
+              AND b.booking_status IN ('Approved', 'Checked In')
               AND b.requested_start < @RequestedEnd
               AND b.requested_end > @RequestedStart
         )
             THROW 51012,
-                  'An overlapping approved booking exists for this space.',
+                  'An overlapping approved or checked-in booking exists for this space.',
                   1;
 
         IF EXISTS
@@ -274,24 +518,89 @@ BEGIN
                   'Overlapping active out-of-service maintenance exists for this space.',
                   1;
 
+        /* Acknowledgements are captured at submission time. Their historical
+           status/impact must not be reinterpreted during later Staff approval,
+           but every stored acknowledgement must still belong to this space. */
+        IF EXISTS
+        (
+            SELECT 1
+            FROM dbo.BOOKING_ADVISORY_ACK AS a
+            JOIN dbo.MAINTENANCERECORD AS m
+              ON m.maintenance_id = a.maintenance_id
+            WHERE a.booking_id = @BookingId
+              AND m.space_code <> @LockedSpaceCode
+        )
+            THROW 51053,
+                  'The booking contains an advisory acknowledgement for another space.',
+                  1;
+
+        /* Instant approval occurs in the submission transaction, so its
+           acknowledgement set must still exactly match current advisories. */
+        IF @ResolutionPath = 'Instant'
+           AND
+           (
+               EXISTS
+               (
+                   SELECT 1
+                   FROM dbo.MAINTENANCERECORD AS m
+                   WHERE m.space_code = @LockedSpaceCode
+                     AND m.maintenance_status IN ('Reported', 'In Progress')
+                     AND m.impact_level = 'advisory'
+                     AND m.start_time < @RequestedEnd
+                     AND ISNULL(m.completion_time, CONVERT(DATETIME, '9999-12-31', 120)) > @RequestedStart
+                     AND NOT EXISTS
+                     (
+                         SELECT 1
+                         FROM dbo.BOOKING_ADVISORY_ACK AS a
+                         WHERE a.booking_id = @BookingId
+                           AND a.maintenance_id = m.maintenance_id
+                     )
+               )
+               OR EXISTS
+               (
+                   SELECT 1
+                   FROM dbo.BOOKING_ADVISORY_ACK AS a
+                   LEFT JOIN dbo.MAINTENANCERECORD AS m
+                     ON m.maintenance_id = a.maintenance_id
+                    AND m.space_code = @LockedSpaceCode
+                    AND m.maintenance_status IN ('Reported', 'In Progress')
+                    AND m.impact_level = 'advisory'
+                    AND m.start_time < @RequestedEnd
+                    AND ISNULL(m.completion_time, CONVERT(DATETIME, '9999-12-31', 120)) > @RequestedStart
+                   WHERE a.booking_id = @BookingId
+                     AND m.maintenance_id IS NULL
+               )
+           )
+            THROW 51054,
+                  'Instant approval requires the exact active advisory acknowledgement set.',
+                  1;
+
         UPDATE dbo.BOOKING
         SET booking_status = 'Approved',
             approver_id =
                 CASE
-                    WHEN @ApprovalPath = 'Staff'
+                    WHEN @ResolutionPath = 'Staff'
                         THEN @ApproverId
                     ELSE NULL
                 END,
-            decision_time = GETDATE(),
+            decision_time =
+                CASE
+                    WHEN @ResolutionPath = 'Instant'
+                        THEN @CreatedAt
+                    ELSE GETDATE()
+                END,
             decision_note = @DecisionNote,
             rejection_reason = NULL
         WHERE booking_id = @BookingId;
 
-        COMMIT TRANSACTION;
+        IF @StartedTransaction = 1
+            COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
-        IF XACT_STATE() <> 0
+        IF @StartedTransaction = 1 AND XACT_STATE() <> 0
             ROLLBACK TRANSACTION;
+        ELSE IF @StartedTransaction = 0 AND XACT_STATE() = 1
+            ROLLBACK TRANSACTION sp_ApproveBookingSave;
 
         THROW;
     END CATCH;
@@ -299,7 +608,7 @@ END;
 GO
 
 /* =========================================================
-   3. Protected maintenance escalation procedure
+   4. Protected maintenance escalation procedure
    ========================================================= */
 CREATE OR ALTER PROCEDURE dbo.sp_EscalateMaintenanceImpact
     @MaintenanceId INT,
@@ -396,7 +705,7 @@ BEGIN
             @MaintenanceId AS maintenance_id
         FROM dbo.BOOKING AS b
         WHERE b.space_code = @LockedSpaceCode
-          AND b.booking_status = 'Approved'
+          AND b.booking_status IN ('Approved', 'Checked In')
           AND b.requested_start < ISNULL(@CompletionTime, CONVERT(DATETIME, '9999-12-31', 120))
           AND b.requested_end > @StartTime
         ORDER BY b.requested_start, b.booking_id;
@@ -412,21 +721,30 @@ END;
 GO
 
 /* =========================================================
-   4. Permission or access-path notes
+   5. Permission or access-path notes
 
-   The repository defines no database users or roles. Deployment must grant
-   application/workflow identities EXECUTE on these procedures and must not
-   grant them UPDATE on dbo.BOOKING.booking_status, approver_id, decision_time,
-   or decision_note. Instant and staff approval paths both invoke
-   dbo.sp_ApproveBooking; callers retry deadlock error 1205 outside the proc.
+   AppServiceRole may create and resolve bookings only through the protected
+   procedures. Ownership chaining permits procedure-owned writes while direct
+   INSERT and protected-column UPDATE attempts remain denied. Deadlock error
+   1205 is surfaced for caller-managed retry outside the procedures.
    ========================================================= */
+DENY INSERT
+ON OBJECT::dbo.BOOKING
+TO AppServiceRole;
+GO
+
 DENY UPDATE 
 (
     booking_status,
     approver_id,
     decision_time,
     decision_note,
-    approval_path
+    resolution_path,
+    rejection_reason,
+    requester_id,
+    space_code,
+    requested_start,
+    requested_end
 )
 ON OBJECT::dbo.BOOKING
 TO AppServiceRole;
@@ -442,6 +760,18 @@ GO
 
 DENY INSERT
 ON OBJECT::dbo.MAINTENANCE_IMPACT_HISTORY
+TO AppServiceRole;
+GO
+DENY INSERT, UPDATE, DELETE
+ON OBJECT::dbo.BOOKING_ADVISORY_ACK
+TO AppServiceRole;
+GO
+GRANT EXECUTE, REFERENCES
+ON TYPE::dbo.BookingAdvisoryAckListType
+TO AppServiceRole;
+GO
+GRANT EXECUTE
+ON OBJECT::dbo.sp_SubmitBooking
 TO AppServiceRole;
 GO
 GRANT EXECUTE
@@ -464,7 +794,7 @@ ALTER ROLE AppServiceRole ADD MEMBER AppServiceUser;
 The application user must not be a member of db_owner or db_datawriter.
 */
 /* =========================================================
-   5. Verification queries for object creation
+   6. Verification queries for object creation
    ========================================================= */
 SELECT
     p.name AS procedure_name,
@@ -472,7 +802,8 @@ SELECT
     p.modify_date
 FROM sys.procedures AS p
 WHERE p.schema_id = SCHEMA_ID('dbo')
-  AND p.name IN ('sp_ApproveBooking', 'sp_EscalateMaintenanceImpact');
+  AND p.name IN
+      ('sp_SubmitBooking', 'sp_ApproveBooking', 'sp_EscalateMaintenanceImpact');
 
 SELECT
     t.name AS trigger_name,
@@ -482,12 +813,51 @@ WHERE t.parent_id = OBJECT_ID('dbo.BOOKING')
   AND t.name = 'TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE';
 GO
 
+SELECT
+    dp.state_desc AS permission_state,
+    dp.permission_name,
+    OBJECT_SCHEMA_NAME(dp.major_id) AS schema_name,
+    OBJECT_NAME(dp.major_id) AS object_name,
+    c.name AS column_name
+FROM sys.database_permissions AS dp
+JOIN sys.database_principals AS pr
+    ON pr.principal_id = dp.grantee_principal_id
+LEFT JOIN sys.columns AS c
+    ON c.object_id = dp.major_id
+   AND c.column_id = dp.minor_id
+WHERE pr.name = 'AppServiceRole'
+  AND dp.class_desc = 'OBJECT_OR_COLUMN'
+  AND OBJECT_SCHEMA_NAME(dp.major_id) = 'dbo'
+  AND OBJECT_NAME(dp.major_id) IN
+       ('BOOKING', 'BOOKING_ADVISORY_ACK', 'MAINTENANCERECORD',
+        'MAINTENANCE_IMPACT_HISTORY', 'sp_SubmitBooking',
+        'sp_ApproveBooking', 'sp_EscalateMaintenanceImpact')
+ORDER BY object_name, column_name, permission_state, dp.permission_name;
+GO
+
+SELECT
+    dp.state_desc AS permission_state,
+    dp.permission_name,
+    SCHEMA_NAME(tt.schema_id) AS schema_name,
+    tt.name AS type_name
+FROM sys.database_permissions AS dp
+JOIN sys.database_principals AS pr
+  ON pr.principal_id = dp.grantee_principal_id
+JOIN sys.table_types AS tt
+  ON tt.user_type_id = dp.major_id
+WHERE pr.name = 'AppServiceRole'
+  AND dp.class_desc = 'TYPE'
+  AND tt.user_type_id = TYPE_ID(N'dbo.BookingAdvisoryAckListType')
+ORDER BY dp.permission_name;
+GO
+
 /* =========================================================
-   6. Known limitations and Step 13 test handoff
+   7. Known limitations and Step 13 test handoff
 
    - This script contains no WAITFOR statements or multi-session tests.
    - Step 13 must demonstrate staff/staff, instant/instant, instant/staff,
      and approval-versus-escalation contention in separate sessions.
-   - The per-space lock protects only approval and escalation calls that use
-     these protected procedures; the permission policy above is required.
+   - The per-space lock protects only submission, approval, and escalation
+     calls that use these protected procedures; the permission policy above
+     is required.
    ========================================================= */
