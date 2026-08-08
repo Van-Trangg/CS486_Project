@@ -99,6 +99,79 @@ PRINT '';
 GO
 
 -- ============================================================
+-- Query 2: Number of Approved Bookings by Weekday and Hour for a Given Semester
+-- ============================================================
+/*
+1. Business Question:
+   How many approved bookings occur on each weekday and in each hour of the day during a specified academic semester?
+
+2. Target User:
+   Facility Manager, Facility Staff, and Academic Space Planners who plan staffing, maintenance windows, and peak-hour demand.
+
+3. Business Value:
+   Reveals high- and low-demand weekday/hour buckets so the facility team can schedule staff during peak times, place maintenance in low-demand windows, and inform usage-policy decisions. Complements Query 1 (hours per space) by showing the temporal distribution of demand.
+
+4. Parameters:
+   @SemesterName NVARCHAR(50) — Human-readable semester label (e.g., 'Fall 2024')
+   @SemesterStart DATETIME    — Inclusive start timestamp of the semester (e.g., '2024-09-01 00:00:00')
+   @SemesterEnd DATETIME      — Inclusive end timestamp of the semester (e.g., '2024-12-31 23:59:59')
+
+5. SQL Statement:
+   Provided below.
+
+6. Correctness Notes:
+   - Active Booking Filter: Considers only bookings in active approved states ('Approved', 'Checked In', 'Completed'), matching Query 1. Excludes 'Pending', 'Rejected', 'Cancelled', and 'No-Show'.
+   - Bucketing: Each booking is counted once, in the weekday and hour bucket of its requested_start. The weekday-and-hour report buckets by the requested start time, consistent with the semester boundary filter.
+   - Semester Boundary Filter: Filters bookings whose requested_start falls within [@SemesterStart, @SemesterEnd].
+
+7. Expected Output Meaning:
+   - weekday_num: Numeric weekday (1 = Sunday under default DATEFIRST).
+   - weekday_name: Weekday name (e.g., 'Monday').
+   - start_hour: Hour bucket (0-23) of requested_start.
+   - approved_booking_count: Number of active approved bookings starting in that weekday and hour.
+*/
+
+-- ============================================================
+-- Performance Index
+-- ============================================================
+-- Supports the semester range seek on requested_start and the approved-lifecycle
+-- status filter. After creating this index, Query 2's logical reads dropped from
+-- 1,988 to 26 and median elapsed time from 26 ms to 6 ms (Step 15 report).
+
+CREATE INDEX IX_BOOKING_WeekdayHour
+ON BOOKING(requested_start)
+WHERE booking_status IN ('Approved', 'Checked In', 'Completed');
+
+PRINT '--- Query 2: Number of Approved Bookings by Weekday and Hour for a Given Semester ---';
+
+-- Declare Semester Parameters (Default: Fall 2024)
+DECLARE @SemesterName NVARCHAR(50) = 'Fall 2024';
+DECLARE @SemesterStart DATETIME   = '2024-09-01 00:00:00';
+DECLARE @SemesterEnd DATETIME     = '2024-12-31 23:59:59';
+
+SELECT
+    DATEPART(WEEKDAY, requested_start) AS weekday_num,
+    DATENAME(WEEKDAY, requested_start) AS weekday_name,
+    DATEPART(HOUR, requested_start) AS start_hour,
+    COUNT(*) AS approved_booking_count
+FROM dbo.BOOKING
+WHERE booking_status IN ('Approved', 'Checked In', 'Completed')
+  AND requested_start >= @SemesterStart
+  AND requested_start <= @SemesterEnd
+GROUP BY
+    DATEPART(WEEKDAY, requested_start),
+    DATENAME(WEEKDAY, requested_start),
+    DATEPART(HOUR, requested_start)
+ORDER BY weekday_num, start_hour;
+GO
+
+PRINT '============================================================';
+PRINT 'Query 2 Execution Complete';
+PRINT '============================================================';
+PRINT '';
+GO
+
+-- ============================================================
 -- Query 3: Available Spaces by Capacity, Facilities, and Time Period
 -- ============================================================
 /*

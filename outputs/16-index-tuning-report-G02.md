@@ -116,3 +116,128 @@ The filtered index adds storage and maintenance for rows currently in `Approved`
 ## Conclusion
 
 Retain `IX_BOOKING_Approved_Space_Start`. It is nonredundant, matches the exact `Approved` conflict predicate, preserved results and concurrency semantics, and reduced observed logical reads from 2,520 to 2. The accompanying script reproduces the baseline, filtered-index creation, after measurement, correctness checks, and optional rollback without changing any other tuning target.
+
+# Number of Approved Bookings by Weekday and Hour (Additional Reporting Query)
+
+## Business and Reporting Context
+
+Phase 2 requires a report showing the number of approved bookings by weekday and hour for a given semester (`req/business-requirement-phase2.md`, "New reporting needs"; P2-BR-08). This is the group's selected **additional reporting query** — the "other" reporting operation beyond the booking-conflict check and the room-finder query that the Phase 2 handout requires to be indexed (AGENTS.md §8.3). The query uses the same approved-lifecycle status definition as analytical Query 1 and the same semester-boundary convention as the group's documented semester design decision (Step 9, Decision 4): semester start and end are supplied as report parameters.
+
+## Baseline Query
+
+The measured operation is the approved-bookings-by-weekday-and-hour report for a single semester:
+
+```sql
+SELECT
+    DATEPART(WEEKDAY, requested_start) AS weekday_num,
+    DATENAME(WEEKDAY, requested_start) AS weekday_name,
+    DATEPART(HOUR, requested_start) AS start_hour,
+    COUNT(*) AS approved_booking_count
+FROM dbo.BOOKING
+WHERE booking_status IN ('Approved', 'Checked In', 'Completed')
+  AND requested_start >= @SemesterStart
+  AND requested_start <= @SemesterEnd
+GROUP BY
+    DATEPART(WEEKDAY, requested_start),
+    DATENAME(WEEKDAY, requested_start),
+    DATEPART(HOUR, requested_start)
+ORDER BY weekday_num, start_hour;
+```
+
+The status filter matches the approved-lifecycle statuses used by analytical Query 1 (`Approved`, `Checked In`, `Completed`). A booking is counted once, in the weekday and hour bucket of its `requested_start`; the semester boundary is applied to `requested_start` inclusive on both ends, consistent with the other semester reports.
+
+## Dataset and Test Environment
+
+- Server/database: local SQL Server `localhost`, `University`.
+- Dataset: the loaded Step 14 generator output, identical to the booking-conflict benchmark.
+- Observed `BOOKING` rows: 105,000.
+- Observed approved-lifecycle rows (`Approved`, `Checked In`, `Completed`): 77,700 (74.0%).
+- Benchmark semester: Fall 2024, `[2024-09-01 00:00, 2024-12-31 23:59]`, matching analytical Query 1's default semester parameters.
+- Rows counted by the benchmark: 10,107 approved-lifecycle bookings; result set: 63 rows (7 weekdays × 9 hour buckets).
+- Cache conditions: warm-cache runs only. No `DBCC FREEPROCCACHE` or `DBCC DROPCLEANBUFFERS` command was issued. Each phase used one `STATISTICS PROFILE` execution and two additional identical steady-state executions.
+
+## Existing Indexes
+
+Before tuning, `dbo.BOOKING` had one index:
+
+| Index | Keys | Includes | Filter | Weekday-and-hour-query fit | Redundant with selected index? |
+| --- | --- | --- | --- | --- | --- |
+| `PK_BOOKING` | `booking_id` | None | None | Leading key is `booking_id`, which does not serve the status or `requested_start` predicates | No |
+
+`PK_BOOKING` was the clustered unique primary key. The report predicate had to filter all 105,000 rows by `booking_status` and `requested_start` as residual predicates.
+
+## Baseline Plan and Measurements
+
+Actual plan evidence was captured with `SET STATISTICS PROFILE ON`; I/O and timing evidence used `SET STATISTICS IO ON` and `SET STATISTICS TIME ON`.
+
+- Main access: `Clustered Index Scan` on `PK_BOOKING`, reading every row and applying `requested_start` and `booking_status` as residual predicates.
+- Actual versus estimated rows at the scan: 10,107 versus 16,000.7.
+- Logical reads: 1,988 in each of three runs.
+- Key lookup: none; the clustered index itself supplied all columns.
+- Grouping and ordering were computed by the optimizer above the scan.
+
+Observed baseline elapsed times were 34 ms, 24 ms, and 26 ms (the first value includes the profiling run). Median elapsed time is used in the comparison.
+
+## Candidate Indexes Considered
+
+| Candidate | Decision | Rationale |
+| --- | --- | --- |
+| `(requested_start) INCLUDE (booking_status)` without filter | Not selected | Stores all 105,000 rows including rejected, cancelled, pending, and no-show rows that the report never reads. |
+| `(requested_start) WHERE booking_status IN ('Approved', 'Checked In', 'Completed')` | Selected | The filter matches the report's exact status set and narrows the index to the observed 74% approved-lifecycle subset; `requested_start` is the range seek key. |
+
+## Selected Index
+
+```sql
+CREATE NONCLUSTERED INDEX IX_BOOKING_WeekdayHour
+ON dbo.BOOKING (requested_start)
+WHERE booking_status IN ('Approved', 'Checked In', 'Completed');
+```
+
+The filtered index stores only the 77,700 approved-lifecycle rows. `requested_start` is the leading and only key, which lets the optimizer seek directly on the semester range without reading rejected, cancelled, pending, or no-show rows. `booking_id` is available implicitly as the clustered key in this nonclustered index, so explicitly including it would be redundant. The filter's status set is exactly the report's `IN` predicate, so no residual status filter is needed inside the index.
+
+## After-Index Plan and Measurements
+
+- Main access: `Index Seek` on `IX_BOOKING_WeekdayHour`.
+- Seek predicates: `requested_start >= @SemesterStart` and `requested_start <= @SemesterEnd`.
+- Residual predicates: none.
+- Actual versus estimated rows at the seek: 10,107 versus 17,253.3.
+- Key lookup: none.
+- Index footprint: 77,700 rows, 188 used pages, 1.47 MB.
+- Report result: 63 rows, unchanged from baseline.
+
+Observed after-index elapsed times were 7 ms, 6 ms, and 6 ms. Median elapsed time is used in the comparison.
+
+## Before-and-After Comparison
+
+| Metric | Before | After | Change | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| Main access | `PK_BOOKING` clustered scan | Filtered index seek | Improved | The filtered index restricts the scan to the 74% approved-lifecycle subset and adds a `requested_start` range seek. |
+| Logical reads, median | 1,988 | 26 | -1,962 (98.69%) | Observed substantial reduction. |
+| Elapsed time, median | 26 ms | 6 ms | 20 ms lower (~77%) | Steady-state elapsed time reduced. |
+| Estimated / actual rows | 16,000.7 / 10,107 | 17,253.3 / 10,107 | Comparable | Both plans read the same 10,107 target rows. |
+| Reported row count | 10,107 | 10,107 | Identical | Both forms count the same approved-lifecycle bookings. |
+| Result rows | 63 | 63 | Identical | Weekday/hour bucket set unchanged. |
+| Key lookup | None | None | Unchanged | The index covers the only column the query needs. |
+
+## Correctness Verification
+
+- The before and after predicates and semester parameters were identical (`Fall 2024`).
+- Both phases returned the same 10,107 counted bookings and the same 63 weekday/hour result rows.
+- The half-open boundary rule is not affected: this report uses inclusive semester bounds on `requested_start`, and the index changes only lookup cost, not which rows satisfy the predicate.
+- The index does not alter `booking_status` or any interval semantics; it only narrows the rows considered to the approved-lifecycle statuses already required by the query.
+- No correctness-sensitive booking or approval operation uses `NOLOCK`, and this tuning does not touch `dbo.sp_ApproveBooking` or the Step 12 locking protocol.
+
+## Write and Maintenance Cost
+
+The filtered index adds storage and maintenance for rows in the `Approved`, `Checked In`, or `Completed` status, rather than all booking rows. Inserts or status transitions into those statuses, and changes to `requested_start`, incur index maintenance. This is an acceptable trade-off for the observed 74% filtered subset and the 1,962-page read reduction, but index size and update overhead should be monitored after production workload characteristics are known.
+
+## Limitations
+
+- Measurements use the Fall 2024 semester on the generated dataset. Other semesters, and the selected status set, should be re-measured before extrapolating to every report invocation.
+- The elapsed after-index values are small (6 ms median), so the exact percentage improvement should be interpreted with the machine's timer resolution in mind; the reads reduction is the more stable signal.
+- Warm-cache results are intentionally reported; cold-cache behavior was not measured.
+- The index is sized for the current 74% approved-lifecycle share; a materially different status distribution would change its selectivity.
+
+## Conclusion
+
+Retain `IX_BOOKING_WeekdayHour`. It is nonredundant with `PK_BOOKING` and the booking-conflict index, matches the report's exact status predicate, preserved the 63-row result set and the 10,107 counted bookings, and reduced observed logical reads from 1,988 to 26 with a median elapsed-time reduction from 26 ms to 6 ms.
