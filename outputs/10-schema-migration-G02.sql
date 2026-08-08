@@ -27,7 +27,7 @@ GO
 IF DB_ID('University') IS NULL
 BEGIN
     RAISERROR('Database [University] does not exist. Please run 05-db-definition-G02.sql first.', 16, 1);
-    RETURN;
+    SET NOEXEC ON;
 END;
 GO
 
@@ -35,7 +35,7 @@ GO
 IF OBJECT_ID('dbo.MAINTENANCERECORD', 'U') IS NULL OR OBJECT_ID('dbo.BOOKING', 'U') IS NULL OR OBJECT_ID('dbo.USER', 'U') IS NULL
 BEGIN
     RAISERROR('Required Phase 1 baseline tables (MAINTENANCERECORD, BOOKING, USER) are missing.', 16, 1);
-    RETURN;
+    SET NOEXEC ON;
 END;
 GO
 
@@ -159,6 +159,12 @@ BEGIN TRY
         );
     END;
 
+    IF TYPE_ID('dbo.BookingAdvisoryAckListType') IS NULL
+    BEGIN
+        PRINT 'Creating type [BookingAdvisoryAckListType]...';
+        EXEC('CREATE TYPE dbo.BookingAdvisoryAckListType AS TABLE ( maintenance_id INT NOT NULL PRIMARY KEY );');
+    END;
+
     COMMIT TRANSACTION;
     PRINT 'Section 3 (New Tables Creation) completed successfully.';
 END TRY
@@ -211,13 +217,43 @@ GO
 PRINT 'Trigger TR_BOOKING_RESOLUTION_PATH_IMMUTABLE created successfully.';
 GO
 
--- 4.2 Drop obsolete Phase 1 trigger TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP (C08-01, P2-BR-06)
--- In Phase 2, maintenance creation/escalation must not be blocked by pre-existing approved bookings.
--- Overlapping approved bookings are identified via Report Query 4 for staff follow-up.
+-- 4.2 Replace Phase 1 trigger TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP
+-- Phase 2 requires allowing advisory escalation but preventing new out-of-service overlaps.
 IF OBJECT_ID('dbo.TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP', 'TR') IS NOT NULL
 BEGIN
     DROP TRIGGER dbo.TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP;
     PRINT 'Obsolete Phase 1 trigger [TR_MAINTENANCE_PREVENT_BOOKING_OVERLAP] dropped successfully.';
+END;
+GO
+
+CREATE OR ALTER TRIGGER dbo.TR_MAINTENANCE_PREVENT_OUT_OF_SERVICE_OVERLAP
+ON dbo.MAINTENANCERECORD
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN dbo.BOOKING b ON b.space_code = i.space_code
+            AND b.booking_status IN ('Approved', 'Checked In')
+            AND b.requested_start < ISNULL(i.completion_time, CONVERT(DATETIME, '9999-12-31', 120))
+            AND b.requested_end > i.start_time
+        LEFT JOIN deleted d ON d.maintenance_id = i.maintenance_id
+        WHERE i.impact_level = 'out-of-service'
+          AND i.maintenance_status IN ('Reported', 'In Progress')
+          AND NOT (
+              d.maintenance_id IS NOT NULL 
+              AND d.impact_level = 'advisory'
+              AND d.space_code = i.space_code
+              AND d.start_time = i.start_time
+              AND ISNULL(d.completion_time, CONVERT(DATETIME, '9999-12-31', 120)) = ISNULL(i.completion_time, CONVERT(DATETIME, '9999-12-31', 120))
+          )
+    )
+    BEGIN
+        ; THROW 51026, 'Active out-of-service maintenance cannot overlap approved bookings, except when escalating an advisory.', 1;
+    END
 END;
 GO
 
@@ -260,7 +296,7 @@ BEGIN
           )
     )
     BEGIN
-        THROW 51001, 'Approved bookings cannot overlap another approved booking, active out-of-service maintenance, or an unavailable space.', 1;
+        ; THROW 51001, 'Approved bookings cannot overlap another approved booking, active out-of-service maintenance, or an unavailable space.', 1;
     END;
 END;
 GO
@@ -284,7 +320,7 @@ BEGIN
             OR i.requested_end <> d.requested_end
     )
     BEGIN
-        THROW 51070,
+        ; THROW 51070,
             'Requester, space, and requested period cannot be changed after booking submission.',
             1;
     END;
@@ -331,7 +367,7 @@ BEGIN
             )
     )
     BEGIN
-        THROW 51020,
+        ; THROW 51020,
             'Invalid advisory acknowledgement: maintenance must be an active overlapping advisory for the booking space.',
             1;
     END;
@@ -347,7 +383,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    THROW 51021,
+    ; THROW 51021,
         'Booking advisory acknowledgement records are immutable and cannot be updated or deleted.',
         1;
 END;
@@ -362,96 +398,33 @@ BEGIN
 
     IF EXISTS (SELECT 1 FROM deleted)
     BEGIN
-        THROW 51023,
+        ; THROW 51023,
             'Maintenance impact history is immutable and cannot be updated or deleted.',
             1;
     END;
 END;
 GO
-/* ============================================================
--- 4.3 Stored Procedure Stub: dbo.sp_SubmitBooking (C08-04, C08-06, P2-BR-07, P2-BR-10)
-   Booking submission and resolution-path assignment
 
-   NOTE:
-   This is intentionally NOT concurrency-safe.
-   Step 12 will upgrade this procedure with:
-   - explicit transaction
-   - per-space UPDLOCK, HOLDLOCK
-   - fresh booking-conflict check
-   - Out-of-Service maintenance check
-   - advisory acknowledgement validation
-   ============================================================ */
-
-CREATE OR ALTER PROCEDURE dbo.sp_SubmitBooking
-    @BookingId INT
+CREATE OR ALTER TRIGGER dbo.TR_MAINTENANCE_IMPACT_HISTORY_VALIDATE_INSERT
+ON dbo.MAINTENANCE_IMPACT_HISTORY
+AFTER INSERT
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    IF @BookingId IS NULL
-    BEGIN
-        RAISERROR('BookingId is required.', 16, 1);
-        RETURN;
-    END;
-
-    /* Booking must exist and still be pending */
-    IF NOT EXISTS
-    (
+    IF EXISTS (
         SELECT 1
-        FROM dbo.BOOKING
-        WHERE booking_id = @BookingId
-          AND booking_status = 'Pending'
+        FROM inserted i
+        JOIN dbo.MAINTENANCERECORD m ON m.maintenance_id = i.maintenance_id
+        WHERE m.maintenance_status NOT IN ('Reported', 'In Progress')
+           OR i.new_impact_level <> m.impact_level
     )
     BEGIN
-        RAISERROR('Booking does not exist or is not Pending.', 16, 1);
-        RETURN;
-    END;
-
-    /*
-       Phase 2 resolution policy:
-
-       Lecturer / Teaching Assistant + Classroom
-       -> Instant
-
-       All other requests
-       -> Staff
-    */
-    IF EXISTS
-    (
-        SELECT 1
-        FROM dbo.BOOKING AS b
-        JOIN dbo.[USER] AS u
-            ON u.user_id = b.requester_id
-        JOIN dbo.SPACE AS s
-            ON s.space_code = b.space_code
-        WHERE b.booking_id = @BookingId
-          AND u.role IN ('Lecturer', 'Teaching Assistant')
-          AND s.space_type = 'Classroom'
-    )
-    BEGIN
-        UPDATE dbo.BOOKING
-        SET
-            resolution_path = 'Instant',
-            booking_status = 'Approved',
-            approver_id = NULL,
-            decision_time = GETDATE(),
-            decision_note = 'Automatically resolved at submission.'
-        WHERE booking_id = @BookingId
-          AND booking_status = 'Pending';
+        ; THROW 51025, 'Impact history insertion must match the current impact level of an open maintenance record.', 1;
     END
-    ELSE
-    BEGIN
-        UPDATE dbo.BOOKING
-        SET
-            resolution_path = 'Staff'
-        WHERE booking_id = @BookingId
-          AND booking_status = 'Pending';
-    END;
 END;
 GO
 
-PRINT 'Placeholder procedure dbo.sp_SubmitBooking registered successfully.';
-GO
 
 -- ============================================================
 -- Section 5: Post-Migration Validation & Verification Queries
@@ -493,7 +466,14 @@ SELECT
 FROM sys.tables t
 WHERE t.name IN ('BOOKING_ADVISORY_ACK', 'MAINTENANCE_IMPACT_HISTORY');
 
--- 5.3 Verify Constraints Active Status
+-- 5.3 Verify Required Types
+SELECT
+    'Table Type Check' AS verification_check,
+    name AS type_name
+FROM sys.types
+WHERE name = 'BookingAdvisoryAckListType' AND is_table_type = 1;
+
+-- 5.4 Verify Constraints Active Status
 SELECT 
     'Active Constraints Check' AS verification_check,
     parent.name AS table_name,
@@ -524,4 +504,8 @@ END;
 PRINT '============================================================';
 PRINT 'Phase 2 Step 10 Schema Migration Completed Successfully.';
 PRINT '============================================================';
+GO
+
+-- Restore execution if it was halted by preconditions
+SET NOEXEC OFF;
 GO
