@@ -147,7 +147,7 @@ GO
 CREATE INDEX IX_BOOKINGAPPROVED_OVERLAP
 ON BOOKING(space_code, requested_start)
 INCLUDE (requested_end)
-WHERE booking_status = 'Approved'
+WHERE booking_status IN ('Approved', 'Checked In')
 
 CREATE INDEX IX_MAINTOOS_OVERLAP
 ON MAINTENANCERECORD(space_code, start_time, completion_time)
@@ -199,7 +199,7 @@ WHERE
         SELECT 1
         FROM BOOKING b
         WHERE b.space_code = s.space_code
-          AND b.booking_status = 'Approved'
+          AND b.booking_status IN ('Approved', 'Checked In')
           AND b.requested_start < @EndTime
           AND b.requested_end >  @StartTime
     )
