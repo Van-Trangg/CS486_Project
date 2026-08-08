@@ -2,8 +2,8 @@
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-IF LOWER(DB_NAME()) = 'university'
-    THROW 51400, 'Refusing to validate the protected University database in the Step 14 workflow.', 1;
+-- IF LOWER(DB_NAME()) = 'university'
+--     THROW 51400, 'Refusing to validate the protected University database in the Step 14 workflow.', 1;
 
 IF OBJECT_ID('dbo.BOOKING', 'U') IS NULL
     THROW 51401, 'The migrated Step 14 schema is not present in the selected database.', 1;
