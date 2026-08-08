@@ -268,7 +268,7 @@ BEGIN
         JOIN SPACE s ON i.space_code = s.space_code
         WHERE i.booking_status IN ('Approved', 'Checked In')
           AND (
-              s.current_status IN ('Retired', 'Temporarily Closed')
+              s.current_status IN ('Retired', 'Temporarily Closed', 'In Use')
               OR EXISTS (
                   SELECT 1 FROM BOOKING b
                   WHERE b.space_code = i.space_code AND b.booking_id <> i.booking_id
