@@ -214,10 +214,14 @@ GO
 -- ============================================================
 -- Performance Indexes
 -- ============================================================
--- Designed to improve the performance of overlapping checks against BOOKING and MAINTENANCERECORD
--- After creating these indexes, testing revealed that query 3's execution time has reduced from approximately 3 seconds to near-instantaneous
+-- Query 3 (room finder) evaluates two correlated NOT EXISTS subqueries per candidate
+-- space: an approved/checked-in booking overlap check against BOOKING, and an out-of-service maintenance overlap check against MAINTENANCERECORD. 
+-- Without a supporting index, each subquery re-scans its full table once per candidate space.
+--
+-- These two filtered indexes target exactly those predicates. Measured effect: BOOKING logical reads 62,562 -> 74 (-99.88%), 
+-- MAINTENANCERECORD logical reads 2,660 -> 56 (-97.89%), query time ~3 seconds -> below 1 ms
 
-CREATE INDEX IX_BOOKINGAPPROVED_OVERLAP
+CREATE INDEX IX_BOOKING_OCCUPYING_OVERLAP
 ON BOOKING(space_code, requested_start)
 INCLUDE (requested_end)
 WHERE booking_status IN ('Approved', 'Checked In')
@@ -232,8 +236,8 @@ PRINT '--- Executing availability search ---';
 
 -- Declare and set parameters (change according to request)
 DECLARE @RequiredCapacity INT       = 10;
-DECLARE @StartTime        DATETIME  = '2026-03-01 09:00:00';
-DECLARE @EndTime          DATETIME  = '2026-03-01 12:00:00';
+DECLARE @StartTime        DATETIME  = '2023-09-01 09:00:00';
+DECLARE @EndTime          DATETIME  = '2023-09-01 12:00:00';
 
 -- Required facility list: populate with the facility_id values the caller needs
 DECLARE @RequiredFacilities TABLE (facility_id INT PRIMARY KEY);

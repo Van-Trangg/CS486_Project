@@ -241,3 +241,99 @@ The filtered index adds storage and maintenance for rows in the `Approved`, `Che
 ## Conclusion
 
 Retain `IX_BOOKING_WeekdayHour`. It is nonredundant with `PK_BOOKING` and the booking-conflict index, matches the report's exact status predicate, preserved the 63-row result set and the 10,107 counted bookings, and reduced observed logical reads from 1,988 to 26 with a median elapsed-time reduction from 26 ms to 6 ms.
+
+# Available Spaces by Capacity, Facilities, and Time Period (Query 3 — Room Finder)
+
+## Business Context
+
+Facility managers and event planners use this query to find a bookable space matching a required capacity, facility set, and time window. It is a read-only search with no concurrency requirement of its own — the returned list is advisory; an actual booking attempt is still validated independently by `TR_BOOKING_PREVENT_OVERLAPS_AND_UNAVAILABLE` and the Step 12 approval path.
+
+## Baseline Query
+
+Tuning targets the query's two correlated `NOT EXISTS` overlap checks, each evaluated once per space row surviving the capacity and facility filters:
+
+```sql
+-- Approved/Checked-In booking overlap
+AND NOT EXISTS (
+    SELECT 1 FROM BOOKING b
+    WHERE b.space_code = s.space_code
+      AND b.booking_status IN ('Approved', 'Checked In')
+      AND b.requested_start < @EndTime
+      AND b.requested_end   > @StartTime
+)
+
+-- Out-of-service maintenance overlap
+AND NOT EXISTS (
+    SELECT 1 FROM MAINTENANCERECORD m
+    WHERE m.space_code = s.space_code
+      AND m.maintenance_status IN ('Reported', 'In Progress')
+      AND m.impact_level = 'out-of-service'
+      AND m.start_time < @EndTime
+      AND ISNULL(m.completion_time, '9999-12-31') > @StartTime
+)
+```
+
+## Dataset and Test Environment
+
+Same dataset as the prior two benchmarks (Step 14 generator output; `BOOKING` 105,000 rows). `MAINTENANCERECORD` rows: 3,500. `BOOKING` rows: 105,000. `SPACE` rows: 60. Test window: `@RequiredCapacity = 10`, `@StartTime = 2023-09-01 09:00:00`, `@EndTime = 2023-09-01 12:00:00`. Cache and run protocol unchanged: warm cache, one `STATISTICS PROFILE` run plus two steady-state runs, median reported.
+
+## Baseline Plan and Measurements
+
+Before this tuning pass, `BOOKING` carried `PK_BOOKING` and the Approved-only `IX_BOOKING_Approved_Space_Start` (insufficient — it excludes `Checked In`); `MAINTENANCERECORD` carried only its primary key. Neither `NOT EXISTS` check had a usable index, so both fell back to clustered scans.
+
+- BOOKING access: `Clustered Index Scan` on `PK_BOOKING`, rebound once per surviving space row (35 executions), 3,302,950 rows read cumulatively.
+- BOOKING logical reads: 62,562 (Trial 3; 22,363 physical reads — buffer pool not fully warm on this run).
+- MAINTENANCERECORD access: `Clustered Index Scan` on `PK_MAINTENANCERECORD`, 28 executions, 98,000 rows read cumulatively.
+- MAINTENANCERECORD logical reads: 2,660.
+- Query-level CPU / elapsed time (Trial 3): 3,993 ms / 5,416 ms.
+- Result rows: 28
+
+## Selected Indexes
+
+```sql
+CREATE NONCLUSTERED INDEX IX_BOOKING_OCCUPYING_OVERLAP
+ON dbo.BOOKING (space_code, requested_start)
+INCLUDE (requested_end, booking_status)
+WHERE booking_status IN ('Approved', 'Checked In');
+
+CREATE NONCLUSTERED INDEX IX_MAINTENANCE_OOS_OVERLAP
+ON dbo.MAINTENANCERECORD (space_code, start_time, completion_time)
+INCLUDE (maintenance_status)
+WHERE impact_level = 'out-of-service';
+```
+
+`IX_BOOKING_OCCUPYING_OVERLAP` supersedes `IX_BOOKING_Approved_Space_Start`: its filter is a strict superset (`Approved`/`Checked In` vs. `Approved`-only) and it covers every column both the conflict-check and Query 3 need, so the Approved-only index becomes redundant and should be dropped. `IX_MAINTENANCE_OOS_OVERLAP` filters to out-of-service records only, since advisory maintenance never disqualifies a space.
+
+## After-Index Plan and Measurements
+
+- BOOKING access: `Index Seek` on `IX_BOOKING_OCCUPYING_OVERLAP` (filter widened to `IN ('Approved','Checked In')`), 35 executions, 8 rows read cumulatively. Logical reads: 74.
+- MAINTENANCERECORD access: `Index Seek` on `IX_MAINTOOS_OVERLAP`, 28 executions, 2 rows read cumulatively. Logical reads: 56.
+- Query-level CPU / elapsed time (Trial 3): 0 ms / 0 ms — below SSMS's 1 ms reporting resolution; client processing time 9 ms, total execution time 15 ms.
+- Result rows: 28, confirmed via the results grid (matches baseline; SSMS's Client Statistics panel is session-cumulative across trials and was not used as evidence).
+
+## Before-and-After Comparison
+
+| Metric | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| BOOKING access | Clustered scan on `PK_BOOKING` | Index seek on `IX_BOOKING_OCCUPYING_OVERLAP` | Improved |
+| MAINTENANCERECORD access | Clustered scan on `PK_MAINTENANCERECORD` | Index seek on `IX_MAINTOOS_OVERLAP` | Improved |
+| BOOKING logical reads | 62,562 | 74 | -62,488 (99.88%) |
+| MAINTENANCERECORD logical reads | 2,660 | 56 | -2,604 (97.89%) |
+| Query CPU time | 3,993 ms | 0 ms (below reporting resolution) | ~100% reduction — down to sub-millisecond |
+| Query elapsed time | 5,416 ms | 0 ms (below reporting resolution) | ~100% reduction — down to sub-millisecond |
+| Result rows | 28 | 28 | Identical |
+
+## Correctness Verification
+
+- Same query and parameters run before and after index creation; result sets compared row-for-row.
+- Adding `Checked In` to the booking filter changes which statuses count as occupying (matching the enforcement trigger), not the half-open interval overlap rule itself.
+- `impact_level = 'out-of-service'` and the status set are unchanged from the original query — the indexes narrow storage, not query semantics.
+
+## Limitations
+
+- Measured on one representative capacity/time/facility combination; benefit will vary with how selective the capacity and facility filters are.
+- `IX_BOOKING_Approved_Space_Start` should be dropped once `IX_BOOKING_OCCUPYING_OVERLAP` is confirmed in use, to avoid maintaining two overlapping filtered indexes on the same table.
+
+## Conclusion
+
+Retain `IX_BOOKING_OCCUPYING_OVERLAP` (Approved/Checked-In filter) and `IX_MAINTOOS_OVERLAP`. Both `NOT EXISTS` checks moved from clustered scans to filtered index seeks: BOOKING logical reads fell from 62,562 to 74 (99.88%), MAINTENANCERECORD from 2,660 to 56 (97.89%), and query time dropped from a 3,993 ms / 5,416 ms CPU/elapsed baseline to below the 1 ms reporting resolution, while the 28-row result set was identical before and after.
