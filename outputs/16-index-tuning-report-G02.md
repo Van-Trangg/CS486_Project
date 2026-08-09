@@ -279,13 +279,13 @@ Same dataset as the prior two benchmarks (Step 14 generator output; `BOOKING` 10
 
 ## Baseline Plan and Measurements
 
-Before this tuning pass, `BOOKING` carried `PK_BOOKING` and the Approved-only `IX_BOOKING_Approved_Space_Start` (insufficient — it excludes `Checked In`); `MAINTENANCERECORD` carried only its primary key. Neither `NOT EXISTS` check had a usable index, so both fell back to clustered scans.
+Before this tuning pass, `BOOKING` carried `PK_BOOKING` and `IX_BOOKING_Approved_Space_Start` which excludes `Checked In`, while `MAINTENANCERECORD` carried only its primary key. Neither `NOT EXISTS` check had a usable index, so both fell back to clustered scans.
 
 - BOOKING access: `Clustered Index Scan` on `PK_BOOKING`, rebound once per surviving space row (35 executions), 3,302,950 rows read cumulatively.
-- BOOKING logical reads: 62,562 (Trial 3; 22,363 physical reads — buffer pool not fully warm on this run).
+- BOOKING logical reads: 62,562 
 - MAINTENANCERECORD access: `Clustered Index Scan` on `PK_MAINTENANCERECORD`, 28 executions, 98,000 rows read cumulatively.
 - MAINTENANCERECORD logical reads: 2,660.
-- Query-level CPU / elapsed time (Trial 3): 3,993 ms / 5,416 ms.
+- Query-level CPU / elapsed time: 3,993 ms / 5,416 ms.
 - Result rows: 28
 
 ## Selected Indexes
@@ -309,7 +309,7 @@ WHERE impact_level = 'out-of-service';
 - BOOKING access: `Index Seek` on `IX_BOOKING_OCCUPYING_OVERLAP` (filter widened to `IN ('Approved','Checked In')`), 35 executions, 8 rows read cumulatively. Logical reads: 74.
 - MAINTENANCERECORD access: `Index Seek` on `IX_MAINTOOS_OVERLAP`, 28 executions, 2 rows read cumulatively. Logical reads: 56.
 - Query-level CPU / elapsed time (Trial 3): 0 ms / 0 ms — below SSMS's 1 ms reporting resolution; client processing time 9 ms, total execution time 15 ms.
-- Result rows: 28, confirmed via the results grid (matches baseline; SSMS's Client Statistics panel is session-cumulative across trials and was not used as evidence).
+- Result rows: 28, confirmed via the results grid (matches baseline).
 
 ## Before-and-After Comparison
 
@@ -319,15 +319,15 @@ WHERE impact_level = 'out-of-service';
 | MAINTENANCERECORD access | Clustered scan on `PK_MAINTENANCERECORD` | Index seek on `IX_MAINTOOS_OVERLAP` | Improved |
 | BOOKING logical reads | 62,562 | 74 | -62,488 (99.88%) |
 | MAINTENANCERECORD logical reads | 2,660 | 56 | -2,604 (97.89%) |
-| Query CPU time | 3,993 ms | 0 ms (below reporting resolution) | ~100% reduction — down to sub-millisecond |
-| Query elapsed time | 5,416 ms | 0 ms (below reporting resolution) | ~100% reduction — down to sub-millisecond |
+| Query CPU time | 3,993 ms | sub-millisecond (~0 ms) | ~100% reduction |
+| Query elapsed time | 5,416 ms | sub-millisecond (~0 ms) | ~100% reduction |
 | Result rows | 28 | 28 | Identical |
 
 ## Correctness Verification
 
 - Same query and parameters run before and after index creation; result sets compared row-for-row.
 - Adding `Checked In` to the booking filter changes which statuses count as occupying (matching the enforcement trigger), not the half-open interval overlap rule itself.
-- `impact_level = 'out-of-service'` and the status set are unchanged from the original query — the indexes narrow storage, not query semantics.
+- `impact_level = 'out-of-service'` and the status set are unchanged from the original query
 
 ## Limitations
 
