@@ -1,11 +1,12 @@
 /* M2 Session A: gate the space, then attempt approval after escalation queues. */
-USE University;
+USE [$(DatabaseName)];
 GO
 SET ANSI_NULLS, ANSI_PADDING, ANSI_WARNINGS, ARITHABORT, CONCAT_NULL_YIELDS_NULL, QUOTED_IDENTIFIER ON;
 SET NUMERIC_ROUNDABORT OFF;
 GO
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
 
 DECLARE @BookingId INT;
 DECLARE @LockedSpaceCode VARCHAR(50);
@@ -54,4 +55,5 @@ BEGIN CATCH
     IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
     THROW;
 END CATCH;
+SELECT @@SPID AS worker_session_id, @@TRANCOUNT AS worker_open_transaction_count;
 GO

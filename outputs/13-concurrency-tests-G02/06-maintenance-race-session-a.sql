@@ -1,11 +1,12 @@
 /* M1 Session A: hold a real approved booking transaction uncommitted. */
-USE University;
+USE [$(DatabaseName)];
 GO
 SET ANSI_NULLS, ANSI_PADDING, ANSI_WARNINGS, ARITHABORT, CONCAT_NULL_YIELDS_NULL, QUOTED_IDENTIFIER ON;
 SET NUMERIC_ROUNDABORT OFF;
 GO
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
 
 DECLARE @BookingId INT;
 SELECT @BookingId = booking_id
@@ -30,4 +31,5 @@ BEGIN CATCH
     IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
     THROW;
 END CATCH;
+SELECT @@SPID AS worker_session_id, @@TRANCOUNT AS worker_open_transaction_count;
 GO

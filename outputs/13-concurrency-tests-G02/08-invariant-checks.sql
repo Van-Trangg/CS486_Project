@@ -1,4 +1,4 @@
-USE University;
+USE [$(DatabaseName)];
 GO
 SET NOCOUNT ON;
 
@@ -94,15 +94,23 @@ SELECT b.booking_id, b.booking_status, m.maintenance_id, m.impact_level,
           AND r.maintenance_id = m.maintenance_id) AS affected_result_count,
        CASE
            WHEN m.impact_level = 'advisory' THEN 'MAINTENANCE_RACE_NOT_RUN'
-           WHEN b.booking_status = 'Approved'
-            AND EXISTS
+            WHEN b.booking_status = 'Approved'
+             AND (SELECT COUNT(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY AS h
+                  WHERE h.maintenance_id = m.maintenance_id
+                    AND h.old_impact_level = 'advisory'
+                    AND h.new_impact_level = 'out-of-service') = 1
+             AND EXISTS
                 (SELECT 1 FROM dbo.STEP13_MAINTENANCE_RESULT AS r
                  WHERE r.test_code = 'M1-APPROVAL-FIRST'
                    AND r.booking_id = b.booking_id
                    AND r.maintenance_id = m.maintenance_id)
                THEN 'M1_APPROVAL_FIRST_HOLDS'
-           WHEN b.booking_status = 'Pending'
-            AND NOT EXISTS
+            WHEN b.booking_status = 'Pending'
+             AND (SELECT COUNT(*) FROM dbo.MAINTENANCE_IMPACT_HISTORY AS h
+                  WHERE h.maintenance_id = m.maintenance_id
+                    AND h.old_impact_level = 'advisory'
+                    AND h.new_impact_level = 'out-of-service') = 1
+             AND NOT EXISTS
                 (SELECT 1 FROM dbo.STEP13_MAINTENANCE_RESULT AS r
                  WHERE r.maintenance_id = m.maintenance_id)
                THEN 'M2_ESCALATION_FIRST_HOLDS'
@@ -151,7 +159,8 @@ SELECT a.booking_id, a.maintenance_id, a.acknowledged_at
 FROM dbo.BOOKING_ADVISORY_ACK AS a
 JOIN dbo.BOOKING AS b ON b.booking_id = a.booking_id
 WHERE b.space_code LIKE 'T13-%'
-ORDER BY a.booking_id, a.maintenance_id;
+ORDER BY a.booking_id, a.maintenance_id
+OPTION (MAXDOP 1);
 
 SELECT @@SPID AS current_session_id, @@TRANCOUNT AS current_open_transaction_count;
 GO

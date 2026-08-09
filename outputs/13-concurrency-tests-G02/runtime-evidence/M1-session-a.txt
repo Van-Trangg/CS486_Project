@@ -1,0 +1,6 @@
+Changed database context to 'Step13G02_M1'.
+M1 A approved through the real procedure but has not committed. Start M1 Session B now.
+M1 A committed. Escalation should now identify this booking.
+worker_session_id worker_open_transaction_count
+----------------- -----------------------------
+               56                             0

@@ -333,28 +333,7 @@ GO
 
 PRINT '--- Query 4: Approved Bookings Affected by Maintenance Escalation ---';
 
-DECLARE @maintenance_id INT = 18;
-
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM dbo.MAINTENANCERECORD AS m
-    WHERE m.maintenance_id = @maintenance_id
-      AND m.impact_level = 'out-of-service'
-      AND EXISTS
-      (
-          SELECT 1
-          FROM dbo.MAINTENANCE_IMPACT_HISTORY AS h
-          WHERE h.maintenance_id = m.maintenance_id
-            AND h.old_impact_level = 'advisory'
-            AND h.new_impact_level = 'out-of-service'
-      )
-)
-    THROW 51030,
-          'MaintenanceId must identify a currently out-of-service record with a recorded advisory-to-out-of-service escalation.',
-          1;
-
-;WITH TargetMaintenance AS
+;WITH Escalations AS
 (
     SELECT
         m.maintenance_id,
@@ -363,61 +342,79 @@ IF NOT EXISTS
         m.completion_time,
         m.maintenance_status,
         m.impact_level,
-        escalation.history_id AS escalation_history_id,
-        escalation.changed_at AS escalated_at,
-        escalation.changed_by_user_id
+        h.history_id AS escalation_history_id,
+        h.changed_at AS escalated_at,
+        h.changed_by_user_id AS escalated_by_user_id,
+        ROW_NUMBER() OVER
+        (
+            PARTITION BY m.maintenance_id
+            ORDER BY h.changed_at DESC, h.history_id DESC
+        ) AS rn
     FROM dbo.MAINTENANCERECORD AS m
-    CROSS APPLY
-    (
-        SELECT TOP (1)
-            h.history_id,
-            h.changed_at,
-            h.changed_by_user_id
-        FROM dbo.MAINTENANCE_IMPACT_HISTORY AS h
-        WHERE h.maintenance_id = m.maintenance_id
-          AND h.old_impact_level = 'advisory'
-          AND h.new_impact_level = 'out-of-service'
-        ORDER BY h.changed_at DESC, h.history_id DESC
-    ) AS escalation
-    WHERE m.maintenance_id = @maintenance_id
-      AND m.impact_level = 'out-of-service'
+    JOIN dbo.MAINTENANCE_IMPACT_HISTORY AS h
+        ON h.maintenance_id = m.maintenance_id
+       AND h.old_impact_level = 'advisory'
+       AND h.new_impact_level = 'out-of-service'
+    WHERE m.impact_level = 'out-of-service'
 )
 SELECT
-    tm.maintenance_id,
-    tm.escalation_history_id,
-    tm.escalated_at,
-    tm.changed_by_user_id AS escalated_by_user_id,
-    tm.impact_level AS maintenance_impact_level,
-    tm.maintenance_status,
-    tm.start_time AS maintenance_start_time,
-    tm.completion_time AS maintenance_completion_time,
+    e.maintenance_id,
+    e.escalation_history_id,
+    e.escalated_at,
+    e.escalated_by_user_id,
+    e.maintenance_status,
+    e.start_time AS maintenance_start_time,
+    e.completion_time AS maintenance_completion_time,
+
     s.space_code,
     s.space_name,
+
     b.booking_id,
     b.requested_start,
     b.requested_end,
     b.booking_status,
     b.approval_path,
+    b.decision_time,
     b.purpose,
     b.expected_participants,
+
     u.user_id AS requester_id,
     u.full_name AS requester_name,
     u.email AS requester_email,
     u.phone_number AS requester_phone_number
-FROM TargetMaintenance AS tm
+
+FROM Escalations AS e
+
 JOIN dbo.SPACE AS s
-    ON s.space_code = tm.space_code
+    ON s.space_code = e.space_code
+
 JOIN dbo.BOOKING AS b
-    ON b.space_code = tm.space_code
+    ON b.space_code = e.space_code
+
+   -- Booking is approved
    AND b.booking_status = 'Approved'
-   AND b.requested_start < ISNULL(tm.completion_time, CONVERT(DATETIME, '9999-12-31', 120))
-   AND b.requested_end > tm.start_time
+
+   -- Booking overlaps the maintenance period
+   AND b.requested_start <
+       ISNULL(
+           e.completion_time,
+           CONVERT(DATETIME, '9999-12-31', 120)
+       )
+   AND b.requested_end > e.start_time
+
+   -- Booking was already approved when escalation occurred
+   AND b.decision_time <= e.escalated_at
+
 JOIN dbo.[USER] AS u
     ON u.user_id = b.requester_id
-ORDER BY b.requested_start, b.booking_id;
-GO
 
-PRINT '============================================================';
-PRINT 'Query 4 Execution Complete';
-PRINT '============================================================';
+-- Use the most recent Advisory -> Out-of-Service escalation
+WHERE e.rn = 1
+
+ORDER BY
+    e.escalated_at DESC,
+    e.maintenance_id,
+    b.requested_start,
+    b.booking_id;
+
 GO

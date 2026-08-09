@@ -1,0 +1,3 @@
+Changed database context to 'master'.
+Msg 52090, Level 16, State 1, Server DESKTOP-MJJHKPQ, Line 5
+Cleanup refuses to drop a database unless its name matches Step13G02_*.

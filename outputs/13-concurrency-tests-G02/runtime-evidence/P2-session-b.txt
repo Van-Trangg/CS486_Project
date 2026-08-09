@@ -1,0 +1,11 @@
+Changed database context to 'Step13G02_P2'.
+P2 B calls the real sp_SubmitBooking at 2026-08-09T13:57:38.1824069. It must wait on A's test SPACE gate.
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105010 Instant              Approved      
+result                         booking_id  booking_status                 resolution_path      observed_at                           
+------------------------------ ----------- ------------------------------ -------------------- --------------------------------------
+P2 B real submission completed      105010 Approved                       Instant                         2026-08-09 13:57:47.4090503
+worker_session_id worker_open_transaction_count
+----------------- -----------------------------
+               69                             0

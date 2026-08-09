@@ -1,0 +1,38 @@
+Changed database context to 'Step13G02_P1'.
+verified_database                                                                                                                compatibility_level is_read_committed_snapshot_on snapshot_isolation_state_desc                               
+-------------------------------------------------------------------------------------------------------------------------------- ------------------- ----------------------------- ------------------------------------------------------------
+Step13G02_P1                                                                                                                                     160                             0 OFF                                                         
+verified_procedure                                                                                                               modify_date            
+-------------------------------------------------------------------------------------------------------------------------------- -----------------------
+sp_ApproveBooking                                                                                                                2026-08-08 16:49:03.213
+sp_EscalateMaintenanceImpact                                                                                                     2026-08-08 16:49:03.217
+sp_SubmitBooking                                                                                                                 2026-08-08 16:49:03.207
+Verified migrated columns, protected signatures/locks, enabled immutable triggers, and no production WAITFOR.
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105001 Staff                Pending       
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105002 Staff                Pending       
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105003 Staff                Pending       
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105004 Staff                Pending       
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105005 Staff                Pending       
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105006 Staff                Pending       
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105007 Staff                Pending       
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105008 Staff                Pending       
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105009 Staff                Pending       
+Step 13 common test data is ready. Configure one protected pairing once if required.

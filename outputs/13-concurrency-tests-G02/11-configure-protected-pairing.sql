@@ -1,5 +1,5 @@
 /* Run with sqlcmd -v Pairing=StaffStaff, InstantInstant, or InstantStaff. */
-USE University;
+USE [$(DatabaseName)];
 GO
 SET ANSI_NULLS, ANSI_PADDING, ANSI_WARNINGS, ARITHABORT, CONCAT_NULL_YIELDS_NULL, QUOTED_IDENTIFIER ON;
 SET NUMERIC_ROUNDABORT OFF;
@@ -11,20 +11,12 @@ DECLARE @Pairing VARCHAR(20) = '$(Pairing)';
 IF @Pairing NOT IN ('InstantInstant', 'StaffStaff', 'InstantStaff')
     THROW 52010, 'Unsupported protected approval pairing.', 1;
 
-DELETE FROM dbo.BOOKING_ADVISORY_ACK
-WHERE booking_id IN
-(
-    SELECT booking_id
-    FROM dbo.BOOKING
-    WHERE space_code = 'T13-SPACE-A'
-      AND requested_start IN ('2035-06-01T09:00:00', '2035-06-01T10:00:00')
-);
-
-DELETE FROM dbo.BOOKING
-WHERE space_code = 'T13-SPACE-A'
-  AND requested_start IN ('2035-06-01T09:00:00', '2035-06-01T10:00:00');
-
-DELETE FROM dbo.STEP13_TEST_CONFIG WHERE config_id = 1;
+IF EXISTS (SELECT 1 FROM dbo.STEP13_TEST_CONFIG WHERE config_id = 1)
+   OR EXISTS
+      (SELECT 1 FROM dbo.BOOKING
+       WHERE space_code = 'T13-SPACE-A'
+         AND requested_start IN ('2035-06-01T09:00:00', '2035-06-01T10:00:00'))
+    THROW 52011, 'A protected pairing is already configured. Use a fresh Step13G02_* database.', 1;
 
 DECLARE @EmptyAcks dbo.BookingAdvisoryAckListType;
 DECLARE @BookingA INT = NULL;

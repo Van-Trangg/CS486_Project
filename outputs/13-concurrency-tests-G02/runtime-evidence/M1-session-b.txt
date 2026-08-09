@@ -1,0 +1,13 @@
+Changed database context to 'Step13G02_M1'.
+M1 B calls protected escalation at 2026-08-09T14:00:08.6595045. It must wait on A's production SPACE lock.
+M1_PROCEDURE_RESULT_BEGIN
+booking_id  requester_id                                       space_code                                         requested_start         requested_end           booking_status                 maintenance_id
+----------- -------------------------------------------------- -------------------------------------------------- ----------------------- ----------------------- ------------------------------ --------------
+     105001 T13-STUDENT                                        T13-SPACE-A                                        2035-07-01 09:00:00.000 2035-07-01 11:00:00.000 Approved                                 3501
+M1_PROCEDURE_RESULT_END
+result                       test_code                      booking_id  requester_id                                       space_code                                         requested_start         requested_end           booking_status                 maintenance_id
+---------------------------- ------------------------------ ----------- -------------------------------------------------- -------------------------------------------------- ----------------------- ----------------------- ------------------------------ --------------
+M1 affected booking captured M1-APPROVAL-FIRST                   105001 T13-STUDENT                                        T13-SPACE-A                                        2035-07-01 09:00:00.000 2035-07-01 11:00:00.000 Approved                                 3501
+worker_session_id worker_open_transaction_count
+----------------- -----------------------------
+               57                             0

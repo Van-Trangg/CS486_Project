@@ -1,0 +1,10 @@
+Changed database context to 'Step13G02_M2'.
+M2 B calls real escalation at 2026-08-09T13:57:38.3600868. It must wait on A's test SPACE gate.
+M2_PROCEDURE_RESULT_BEGIN
+booking_id  requester_id                                       space_code                                         requested_start         requested_end           booking_status                 maintenance_id
+----------- -------------------------------------------------- -------------------------------------------------- ----------------------- ----------------------- ------------------------------ --------------
+M2_PROCEDURE_RESULT_END
+M2 B escalation committed with no affected booking, as expected.
+worker_session_id worker_open_transaction_count
+----------------- -----------------------------
+               98                             0

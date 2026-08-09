@@ -1,10 +1,12 @@
 # Booking Conflict Check
 
-## Context
+## Business and Concurrency Context
 
-`dbo.sp_ApproveBooking` prevents overlapping occupying bookings by locking the target `SPACE` row with `UPDLOCK, HOLDLOCK`, then rechecking `BOOKING`. The index below only improves that lookup; it does not replace the locking or transaction logic.
+Phase 2 requires that concurrent instant and staff approvals never create overlapping occupying bookings for the same space. `dbo.sp_ApproveBooking` preserves this invariant by first acquiring `dbo.SPACE` with `UPDLOCK, HOLDLOCK`, then rechecking `dbo.BOOKING` inside the same short transaction. The selected index reduces the cost of that recheck and may shorten lock duration; it is not a concurrency-control mechanism and does not replace the lock, transaction, or fresh check.
 
-## Conflict Predicate
+## Baseline Query
+
+The measured predicate is the booking conflict check from `dbo.sp_ApproveBooking`:
 
 ```sql
 WHERE b.space_code = @LockedSpaceCode
@@ -14,20 +16,63 @@ WHERE b.space_code = @LockedSpaceCode
   AND b.requested_end > @RequestedStart
 ```
 
-The half-open interval rule allows adjacent bookings.
+It uses the half-open overlap rule. `requested_end` remains a residual predicate because a conventional B-tree cannot simultaneously seek efficiently on both range endpoints.
 
-## Benchmark Setup
+## Dataset and Test Environment
 
-- Database: `University`
-- `BOOKING` rows: 105,000
-- Same real conflicting Pending booking used for BEFORE and AFTER
-- `SET STATISTICS IO ON`
-- `SET STATISTICS TIME ON`
-- Actual Execution Plan enabled
-- Candidate index removed before baseline
-- No global cache clearing
+- Server/database: local SQL Server, `University`.
+- Dataset: the loaded Step 14 generator output.
+- Observed `BOOKING` rows: 105,000.
+- Benchmark case: a real `Pending` booking selected from the loaded dataset that overlaps an existing occupying booking.
+- Occupying statuses used by the production conflict predicate: `Approved` and `Checked In`.
+- Observed prohibited occupying-overlap pairs after tuning: 0.
+- The exact same booking ID, space, requested start, and requested end were reused in the BEFORE and AFTER phases.
+- Cache conditions: the first execution in each phase could involve physical I/O, followed by two warm-cache executions.
+- No `DBCC FREEPROCCACHE` or `DBCC DROPCLEANBUFFERS` command was issued.
+- Actual Execution Plans were captured for both phases.
+- `SET STATISTICS IO ON` and `SET STATISTICS TIME ON` were used for I/O and timing evidence.
 
-## Candidate Index
+## Existing Indexes
+
+Before tuning, the conflict query did not have an index whose leading keys matched `space_code`, `booking_status`, and the requested-time predicate.
+
+The baseline execution plan selected the clustered primary key:
+
+| Index | Observed use | Conflict-query fit | Redundant with selected index? |
+| --- | --- | --- | --- |
+| `PK_BOOKING` | Clustered Index Seek | Poor fit for same-space/status/time conflict lookup because its leading key is `booking_id` | No |
+
+Although SQL Server reported a `Clustered Index Seek`, the plan read 47,755 rows from a 105,000-row table before returning the conflicting row. This made the baseline access path effectively scan-like for the conflict lookup.
+
+## Baseline Plan and Measurements
+
+Actual Execution Plan evidence for the baseline:
+
+- Main access: `Clustered Index Seek` on `PK_BOOKING`.
+- Actual rows read: 47,755.
+- Actual rows returned: 1.
+- Estimated rows to be read: 43,505.5.
+- Table cardinality: 105,000.
+- The conflict result was `1`.
+
+Observed baseline I/O and timing:
+
+| Run | Logical Reads | Physical Reads | CPU Time | Elapsed Time |
+| --- | ---: | ---: | ---: | ---: |
+| Initial | 913 | 3 | 31 ms | 242 ms |
+| Warm 1 | 913 | 0 | 31 ms | 129 ms |
+| Warm 2 | 913 | 0 | 31 ms | 114 ms |
+
+The stable logical-read count was 913 pages. The warm-cache elapsed times were 129 ms and 114 ms.
+
+## Candidate Indexes Considered
+
+| Candidate | Decision | Rationale |
+| --- | --- | --- |
+| `(space_code, requested_start) INCLUDE (requested_end) WHERE booking_status = 'Approved'` | Not selected | It only supports `Approved` rows and therefore does not match the production predicate, which must also search `Checked In` bookings. |
+| `(space_code, booking_status, requested_start) INCLUDE (requested_end)` | Selected | It matches the authoritative same-space, occupying-status, and time-range conflict predicate used by `dbo.sp_ApproveBooking`. |
+
+## Selected Index
 
 ```sql
 CREATE NONCLUSTERED INDEX IX_BOOKING_ConflictLookup
@@ -37,60 +82,104 @@ ON dbo.BOOKING
     booking_status,
     requested_start
 )
-INCLUDE (requested_end);
+INCLUDE
+(
+    requested_end
+);
 ```
 
-`space_code` and `booking_status` support equality filtering, while `requested_start` supports the range seek. `requested_end` remains a residual predicate, which is expected for interval-overlap queries.
+`space_code` and `booking_status` support equality filtering before the time-range condition. `requested_start` supports range narrowing with `requested_start < @RequestedEnd`. `requested_end` is included so the remaining overlap predicate can be evaluated without an additional key lookup.
 
-## Before vs After
+`requested_end > @RequestedStart` remains a residual predicate. The current booking exclusion, `booking_id <> @BookingId`, is also evaluated after the useful conflict-search range has been narrowed.
 
-| Metric | Before | After | Change |
-|---|---:|---:|---:|
-| Main access | Clustered Index Seek on `PK_BOOKING` | Nonclustered Index Seek on `IX_BOOKING_ConflictLookup` | Improved |
-| Logical reads | 913 | 13 | -98.6% |
-| Actual rows read | 47,755 | 698 | -98.5% |
-| Estimated rows read | 43,505.5 | 770.002 | Reduced |
-| Actual rows returned | 1 | 1 | Same |
-| Warm elapsed run 1 | 129 ms | 76 ms | Improved |
-| Warm elapsed run 2 | 114 ms | 83 ms | Improved |
-| CPU time | 31 ms | 0 ms reported | Improved* |
-| Conflict result | 1 | 1 | Same |
+## After-Index Plan and Measurements
 
-\* `0 ms` means below SQL Server's timing resolution, not zero CPU usage.
-
-The strongest evidence is the reduction in logical reads and rows read. BEFORE used `PK_BOOKING` and read 47,755 rows to return one result. AFTER used `IX_BOOKING_ConflictLookup` and read only 698 rows.
-
-## Correctness
+After creating `IX_BOOKING_ConflictLookup`, SQL Server changed the main access path to:
 
 ```text
-before_conflict_result = 1
-after_conflict_result  = 1
-result_equality_check  = PASS
-prohibited_occupying_overlap_pairs_after_index = 0
+Index Seek (NonClustered) on IX_BOOKING_ConflictLookup
 ```
 
-The query semantics and `Approved`/`Checked In` occupancy rule were preserved.
+Actual Execution Plan evidence:
 
-## Index Cost
+- Actual rows read: 698.
+- Actual rows returned: 1.
+- Estimated rows to be read: 770.002.
+- Table cardinality: 105,000.
+- The plan used `IX_BOOKING_ConflictLookup`.
+- The conflict result remained `1`.
 
-```text
-Index rows: 105,000
-Used pages: 655
-Used size: 5.12 MB
-```
+Observed after-index I/O and timing:
 
-The index is unfiltered because the production query must cover both occupying statuses. This increases write-maintenance cost for relevant `BOOKING` inserts/updates, but the observed 5.12 MB footprint is small relative to the measured read reduction.
+| Run | Logical Reads | Physical Reads | CPU Time | Elapsed Time |
+| --- | ---: | ---: | ---: | ---: |
+| Initial | 13 | 6 | 0 ms | 206 ms |
+| Warm 1 | 13 | 0 | 0 ms | 76 ms |
+| Warm 2 | 13 | 0 | 0 ms | 83 ms |
+
+SQL Server reported CPU time as `0 ms` for the AFTER runs. This should be interpreted as below the timer's reporting resolution for this short query, not as zero CPU consumption.
+
+## Before-and-After Comparison
+
+| Metric | Before | After | Change | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| Main access | `Clustered Index Seek` on `PK_BOOKING` | `Nonclustered Index Seek` on `IX_BOOKING_ConflictLookup` | Improved | The new index supplies useful conflict-search keys. |
+| Logical reads | 913 | 13 | -900 (about 98.6%) | Substantial reduction in page reads. |
+| Actual rows read | 47,755 | 698 | -47,057 (about 98.5%) | SQL Server examines far fewer candidate rows. |
+| Actual rows returned | 1 | 1 | Unchanged | Query result is preserved. |
+| Estimated rows read | 43,505.5 | 770.002 | Substantially reduced | Optimizer expects a much narrower access range. |
+| Warm elapsed run 1 | 129 ms | 76 ms | Improved | Lower observed warm-cache latency. |
+| Warm elapsed run 2 | 114 ms | 83 ms | Improved | Lower observed warm-cache latency. |
+| Returned conflict result | 1 | 1 | Identical | The index does not change conflict semantics. |
+
+The strongest evidence is the reduction in logical reads and rows read. Timing is more sensitive to the local execution environment, so elapsed time is treated as supporting evidence rather than the primary basis for the tuning decision.
+
+## Correctness Verification
+
+- The BEFORE and AFTER phases used the same predicate and the same selected booking parameters.
+- `before_conflict_result = 1`.
+- `after_conflict_result = 1`.
+- `result_equality_check = PASS`.
+- The post-index invariant check returned `prohibited_occupying_overlap_pairs_after_index = 0`.
+- The invariant check includes both `Approved` and `Checked In` booking statuses.
+- The half-open overlap predicates were unchanged, so adjacent intervals remain non-conflicting.
+- `dbo.sp_ApproveBooking` still relies on the per-space `UPDLOCK, HOLDLOCK` and fresh conflict recheck for concurrency correctness.
+- The index changes only the lookup access path and cost; it does not itself enforce the no-overlap invariant.
+
+## Write and Maintenance Cost
+
+The selected index is unfiltered because the production conflict predicate must search both `Approved` and `Checked In` rows.
+
+Observed candidate-index footprint:
+
+| Metric | Observed Value |
+| --- | ---: |
+| Index row count | 105,000 |
+| Used pages | 655 |
+| Used size | 5.12 MB |
+
+The index adds write-maintenance cost for inserts and for updates affecting `space_code`, `booking_status`, `requested_start`, or `requested_end`.
+
+On the measured dataset, this additional 5.12 MB index is accompanied by a reduction from 913 to 13 logical reads and from 47,755 to 698 rows read for the representative booking-conflict lookup.
+
+## Limitations
+
+- Measurements are based on one representative conflicting `Pending` booking selected from the generated dataset.
+- Performance can vary for spaces with different booking densities and for no-conflict or broader-interval cases.
+- Timing results are environment-dependent, so logical reads, rows read, and the Actual Execution Plan are treated as the strongest evidence.
+- The generated dataset preserves the no-overlap invariant for occupying bookings; the benchmark uses a pending candidate interval that overlaps an existing occupying booking.
+- The index does not replace the concurrency protocol in `dbo.sp_ApproveBooking`.
 
 ## Conclusion
 
 Retain `IX_BOOKING_ConflictLookup`.
 
-For the representative production conflict lookup, it reduced:
+The index matches the authoritative `Approved`/`Checked In` booking-conflict predicate and was selected by SQL Server as a nonclustered Index Seek.
 
-- logical reads from **913 to 13**;
-- rows read from **47,755 to 698**;
+For the measured workload, logical reads decreased from 913 to 13, approximately 98.6%, while actual rows read decreased from 47,755 to 698, approximately 98.5%. The conflict result remained unchanged, the result-equality check passed, and the post-index occupying-overlap invariant remained at zero prohibited pairs.
 
-while preserving the conflict result and the zero-overlap invariant. The index improves lookup efficiency only; concurrency correctness still depends on the Step 12 locking protocol and fresh conflict recheck.
+The observed storage footprint is approximately 5.12 MB for 105,000 index rows. This is an acceptable measured trade-off for the substantial reduction in conflict-lookup I/O while preserving the existing concurrency and correctness semantics.
+
 
 # Number of Approved Bookings by Weekday and Hour (Additional Reporting Query)
 

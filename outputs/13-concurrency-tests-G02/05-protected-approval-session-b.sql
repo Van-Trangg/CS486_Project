@@ -1,11 +1,12 @@
 /* P1/P2/P3 Session B. Start after Session A prints its coordination message. */
-USE University;
+USE [$(DatabaseName)];
 GO
 SET ANSI_NULLS, ANSI_PADDING, ANSI_WARNINGS, ARITHABORT, CONCAT_NULL_YIELDS_NULL, QUOTED_IDENTIFIER ON;
 SET NUMERIC_ROUNDABORT OFF;
 GO
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
 
 DECLARE @Pairing VARCHAR(20);
 DECLARE @BookingId INT;
@@ -97,4 +98,5 @@ BEGIN
     SET session_b_finished = 1
     WHERE config_id = 1;
 END;
+SELECT @@SPID AS worker_session_id, @@TRANCOUNT AS worker_open_transaction_count;
 GO

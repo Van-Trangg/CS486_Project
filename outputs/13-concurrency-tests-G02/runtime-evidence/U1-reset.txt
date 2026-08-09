@@ -1,0 +1,4 @@
+Changed database context to 'Step13G02_U1'.
+
+(2 rows affected)
+Unsafe test rows removed. Protected tests may now run.

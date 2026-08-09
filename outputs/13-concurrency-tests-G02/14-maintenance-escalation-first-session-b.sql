@@ -1,11 +1,12 @@
 /* M2 Session B: queue the real escalation while Session A holds the test gate. */
-USE University;
+USE [$(DatabaseName)];
 GO
 SET ANSI_NULLS, ANSI_PADDING, ANSI_WARNINGS, ARITHABORT, CONCAT_NULL_YIELDS_NULL, QUOTED_IDENTIFIER ON;
 SET NUMERIC_ROUNDABORT OFF;
 GO
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
 
 DECLARE @MaintenanceId INT;
 
@@ -22,9 +23,11 @@ PRINT 'M2 B calls real escalation at '
     + CONVERT(VARCHAR(30), SYSDATETIME(), 126)
     + '. It must wait on A''s test SPACE gate.';
 
+PRINT 'M2_PROCEDURE_RESULT_BEGIN';
 EXEC dbo.sp_EscalateMaintenanceImpact
     @MaintenanceId = @MaintenanceId,
     @ChangedByUserId = 'T13-STAFF';
+PRINT 'M2_PROCEDURE_RESULT_END';
 
 INSERT INTO dbo.STEP13_MAINTENANCE_RESULT
     (test_code, booking_id, requester_id, space_code, requested_start,
@@ -44,4 +47,5 @@ IF EXISTS
     THROW 52036, 'M2 escalation unexpectedly found an approved affected booking.', 1;
 
 PRINT 'M2 B escalation committed with no affected booking, as expected.';
+SELECT @@SPID AS worker_session_id, @@TRANCOUNT AS worker_open_transaction_count;
 GO

@@ -1,0 +1,12 @@
+Changed database context to 'Step13G02_P2'.
+P2/P3 A holds the test SPACE gate at 2026-08-09T13:57:37.0947095. Start Session B now; it must queue on this row.
+P2/P3 A released the test gate and calls the real sp_SubmitBooking at 2026-08-09T13:57:47.1064759.
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105011 Staff                Pending       
+result                            booking_id  booking_status                 resolution_path      observed_at                           
+--------------------------------- ----------- ------------------------------ -------------------- --------------------------------------
+P2/P3 A real submission completed      105011 Pending                        Staff                           2026-08-09 13:57:47.4655981
+worker_session_id worker_open_transaction_count
+----------------- -----------------------------
+               68                             0

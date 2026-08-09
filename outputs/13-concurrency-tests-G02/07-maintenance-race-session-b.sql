@@ -1,18 +1,21 @@
 /* M1 Session B. Start while Session A holds its protected approval uncommitted. */
-USE University;
+USE [$(DatabaseName)];
 GO
 SET ANSI_NULLS, ANSI_PADDING, ANSI_WARNINGS, ARITHABORT, CONCAT_NULL_YIELDS_NULL, QUOTED_IDENTIFIER ON;
 SET NUMERIC_ROUNDABORT OFF;
 GO
 SET NOCOUNT ON;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
 DECLARE @MaintenanceId INT;
 SELECT @MaintenanceId = maintenance_id FROM dbo.MAINTENANCERECORD WHERE space_code = 'T13-SPACE-A' AND problem_description = N'Escalation-race advisory.';
 BEGIN TRY
     WAITFOR DELAY '00:00:01';
     PRINT 'M1 B calls protected escalation at ' + CONVERT(VARCHAR(30), SYSDATETIME(), 126) + '. It must wait on A''s production SPACE lock.';
+    PRINT 'M1_PROCEDURE_RESULT_BEGIN';
     EXEC dbo.sp_EscalateMaintenanceImpact
         @MaintenanceId = @MaintenanceId,
         @ChangedByUserId = 'T13-STAFF';
+    PRINT 'M1_PROCEDURE_RESULT_END';
 
     /* The procedure result above is the observed affected list. Persist the
        same post-commit predicate separately because INSERT...EXEC would create
@@ -42,4 +45,5 @@ BEGIN CATCH
     PRINT 'M1 B unexpected escalation error: ' + ERROR_MESSAGE();
     THROW;
 END CATCH;
+SELECT @@SPID AS worker_session_id, @@TRANCOUNT AS worker_open_transaction_count;
 GO

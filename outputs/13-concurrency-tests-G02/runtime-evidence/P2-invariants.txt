@@ -1,0 +1,45 @@
+Changed database context to 'Step13G02_P2'.
+invariant_name                overlap_count result                  
+----------------------------- ------------- ------------------------
+Unsafe approved overlap count             0 NO_UNSAFE_OVERLAP       
+booking_1   booking_2   space_code                                         booking_1_start         booking_1_end           booking_2_start         booking_2_end          
+----------- ----------- -------------------------------------------------- ----------------------- ----------------------- ----------------------- -----------------------
+invariant_name                    overlap_count result                      
+--------------------------------- ------------- ----------------------------
+Protected occupying overlap count             0 PROTECTED_INVARIANT_HOLDS   
+pairing              session_a_finished session_b_finished approved_count pending_count instant_approved_count pairing_result             
+-------------------- ------------------ ------------------ -------------- ------------- ---------------------- ---------------------------
+InstantInstant                        1                  1              1             1                      1 INSTANT_INSTANT_HOLDS      
+booking_id  booking_status                 maintenance_id impact_level         transition_count affected_result_count maintenance_result             
+----------- ------------------------------ -------------- -------------------- ---------------- --------------------- -------------------------------
+     105001 Pending                                  3501 advisory                            0                     0 MAINTENANCE_RACE_NOT_RUN       
+booking_id  booking_status                 applicable_ack_count acknowledgement_result
+----------- ------------------------------ -------------------- ----------------------
+     105009 Pending                                           1 ADVISORY_ACK_HOLDS    
+booking_id  space_code                                         requester_id                                       requested_start         requested_end           booking_status                 resolution_path      approver_id                                        decision_time          
+----------- -------------------------------------------------- -------------------------------------------------- ----------------------- ----------------------- ------------------------------ -------------------- -------------------------------------------------- -----------------------
+     105011 T13-SPACE-A                                        T13-LECTURER                                       2035-06-01 09:00:00.000 2035-06-01 11:00:00.000 Pending                        Staff                NULL                                                                  NULL
+     105010 T13-SPACE-A                                        T13-LECTURER                                       2035-06-01 10:00:00.000 2035-06-01 12:00:00.000 Approved                       Instant              NULL                                               2026-08-09 13:57:47.107
+     105001 T13-SPACE-A                                        T13-STUDENT                                        2035-07-01 09:00:00.000 2035-07-01 11:00:00.000 Pending                        Staff                NULL                                                                  NULL
+     105002 T13-SPACE-A                                        T13-STUDENT                                        2035-08-01 09:00:00.000 2035-08-01 10:00:00.000 Pending                        Staff                NULL                                                                  NULL
+     105003 T13-SPACE-A                                        T13-STUDENT                                        2035-08-01 09:00:00.000 2035-08-01 10:00:00.000 Pending                        Staff                NULL                                                                  NULL
+     105006 T13-SPACE-B                                        T13-STUDENT                                        2035-08-01 09:00:00.000 2035-08-01 11:00:00.000 Pending                        Staff                NULL                                                                  NULL
+     105004 T13-SPACE-A                                        T13-STUDENT                                        2035-08-01 10:00:00.000 2035-08-01 11:00:00.000 Pending                        Staff                NULL                                                                  NULL
+     105005 T13-SPACE-A                                        T13-STUDENT                                        2035-08-01 12:00:00.000 2035-08-01 13:00:00.000 Pending                        Staff                NULL                                                                  NULL
+     105007 T13-SPACE-A                                        T13-STUDENT                                        2035-09-01 09:00:00.000 2035-09-01 10:00:00.000 Pending                        Staff                NULL                                                                  NULL
+     105008 T13-SPACE-B                                        T13-STUDENT                                        2035-10-01 09:00:00.000 2035-10-01 11:00:00.000 Pending                        Staff                NULL                                                                  NULL
+     105009 T13-SPACE-A                                        T13-STUDENT                                        2035-11-01 09:00:00.000 2035-11-01 11:00:00.000 Pending                        Staff                NULL                                                                  NULL
+maintenance_id space_code                                         problem_description                                                                                                                                                                                                                                              start_time              completion_time         maintenance_status   impact_level        
+-------------- -------------------------------------------------- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- ----------------------- ----------------------- -------------------- --------------------
+          3501 T13-SPACE-A                                        Escalation-race advisory.                                                                                                                                                                                                                                        2035-07-01 09:30:00.000 2035-07-01 10:30:00.000 In Progress          advisory            
+          3502 T13-SPACE-B                                        Out-of-service blocking test.                                                                                                                                                                                                                                    2035-10-01 09:30:00.000 2035-10-01 10:30:00.000 In Progress          out-of-service      
+          3503 T13-SPACE-A                                        Advisory non-blocking test.                                                                                                                                                                                                                                      2035-11-01 09:30:00.000 2035-11-01 10:30:00.000 In Progress          advisory            
+history_id  maintenance_id old_impact_level     new_impact_level     changed_by_user_id                                 changed_at             
+----------- -------------- -------------------- -------------------- -------------------------------------------------- -----------------------
+booking_id  maintenance_id acknowledged_at        
+----------- -------------- -----------------------
+     105001           3501 2026-08-09 13:56:22.260
+     105009           3503 2026-08-09 13:56:22.573
+current_session_id current_open_transaction_count
+------------------ ------------------------------
+                57                              0

@@ -1,8 +1,9 @@
 /* U1 Session A. Run first in its own query window. */
-USE University;
+USE [$(DatabaseName)];
 GO
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
 BEGIN TRY
     BEGIN TRANSACTION;
     IF EXISTS (SELECT 1 FROM dbo.STEP13_UNSAFE_BOOKING WHERE test_code = 'T13-UNSAFE' AND space_code = 'T13-SPACE-A' AND booking_status = 'Approved' AND requested_start < '2035-05-01T11:00:00' AND requested_end > '2035-05-01T09:00:00') THROW 52001, 'Unsafe setup is not empty.', 1;
@@ -16,4 +17,5 @@ BEGIN CATCH
     IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
     THROW;
 END CATCH;
+SELECT @@SPID AS worker_session_id, @@TRANCOUNT AS worker_open_transaction_count;
 GO

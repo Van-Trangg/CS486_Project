@@ -1,0 +1,6 @@
+Changed database context to 'Step13G02_U1'.
+U1 A checked availability at 2026-08-09T13:57:36.7870816. Start U1 Session B now.
+U1 A committed unsafe approval.
+worker_session_id worker_open_transaction_count
+----------------- -----------------------------
+               52                             0

@@ -1,0 +1,17 @@
+Changed database context to 'Step13G02_B1'.
+B1 equal interval returned expected 51012.
+B1 Out-of-Service overlap returned expected 51013.
+B1 re-approval returned expected 51006.
+invariant_name    result                
+----------------- ----------------------
+B1 boundary state BOUNDARY_CASES_HOLD   
+booking_id  space_code                                         requested_start         requested_end           booking_status                 resolution_path     
+----------- -------------------------------------------------- ----------------------- ----------------------- ------------------------------ --------------------
+     105002 T13-SPACE-A                                        2035-08-01 09:00:00.000 2035-08-01 10:00:00.000 Approved                       Staff               
+     105003 T13-SPACE-A                                        2035-08-01 09:00:00.000 2035-08-01 10:00:00.000 Pending                        Staff               
+     105006 T13-SPACE-B                                        2035-08-01 09:00:00.000 2035-08-01 11:00:00.000 Approved                       Staff               
+     105004 T13-SPACE-A                                        2035-08-01 10:00:00.000 2035-08-01 11:00:00.000 Approved                       Staff               
+     105005 T13-SPACE-A                                        2035-08-01 12:00:00.000 2035-08-01 13:00:00.000 Approved                       Staff               
+     105007 T13-SPACE-A                                        2035-09-01 09:00:00.000 2035-09-01 10:00:00.000 Approved                       Staff               
+     105008 T13-SPACE-B                                        2035-10-01 09:00:00.000 2035-10-01 11:00:00.000 Pending                        Staff               
+     105009 T13-SPACE-A                                        2035-11-01 09:00:00.000 2035-11-01 11:00:00.000 Approved                       Staff               

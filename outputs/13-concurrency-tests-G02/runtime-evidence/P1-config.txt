@@ -1,0 +1,8 @@
+Changed database context to 'Step13G02_P1'.
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105010 Staff                Pending       
+booking_id  resolution_path      booking_status
+----------- -------------------- --------------
+     105011 Staff                Pending       
+Configured protected pairing: StaffStaff.

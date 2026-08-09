@@ -1,5 +1,5 @@
-/* Step 13 isolated setup. Run after Steps 05, 10, and 12 in University. */
-USE University;
+/* Step 13 isolated setup. Run once in a fresh Step13G02_* disposable database. */
+USE [$(DatabaseName)];
 GO
 SET ANSI_NULLS, ANSI_PADDING, ANSI_WARNINGS, ARITHABORT, CONCAT_NULL_YIELDS_NULL, QUOTED_IDENTIFIER ON;
 SET NUMERIC_ROUNDABORT OFF;
@@ -8,23 +8,80 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 GO
 
+IF DB_NAME() NOT LIKE 'Step13G02[_]%'
+    THROW 52000, 'Step 13 setup requires a disposable database named Step13G02_*.', 1;
+
+IF OBJECT_ID('dbo.sp_SubmitBooking', 'P') IS NULL
+   OR OBJECT_ID('dbo.sp_ApproveBooking', 'P') IS NULL
+   OR OBJECT_ID('dbo.sp_EscalateMaintenanceImpact', 'P') IS NULL
+   OR OBJECT_ID('dbo.TR_BOOKING_ADVISORY_ACK_IMMUTABLE', 'TR') IS NULL
+   OR OBJECT_ID('dbo.TR_MAINTENANCE_IMPACT_HISTORY_IMMUTABLE', 'TR') IS NULL
+    THROW 52000, 'Apply the exact Step 05 -> Step 10 -> Step 12 baseline before setup.', 1;
+
+IF COL_LENGTH('dbo.SPACE', 'space_code') IS NULL
+   OR COL_LENGTH('dbo.BOOKING', 'booking_id') IS NULL
+   OR COL_LENGTH('dbo.BOOKING', 'space_code') IS NULL
+   OR COL_LENGTH('dbo.BOOKING', 'requested_start') IS NULL
+   OR COL_LENGTH('dbo.BOOKING', 'requested_end') IS NULL
+   OR COL_LENGTH('dbo.BOOKING', 'booking_status') IS NULL
+   OR COL_LENGTH('dbo.BOOKING', 'resolution_path') IS NULL
+   OR COL_LENGTH('dbo.MAINTENANCERECORD', 'maintenance_id') IS NULL
+   OR COL_LENGTH('dbo.MAINTENANCERECORD', 'space_code') IS NULL
+   OR COL_LENGTH('dbo.MAINTENANCERECORD', 'start_time') IS NULL
+   OR COL_LENGTH('dbo.MAINTENANCERECORD', 'completion_time') IS NULL
+   OR COL_LENGTH('dbo.MAINTENANCERECORD', 'maintenance_status') IS NULL
+   OR COL_LENGTH('dbo.MAINTENANCERECORD', 'impact_level') IS NULL
+    THROW 52000, 'The Step 13 database does not match the required migrated table contract.', 1;
+
+IF (SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID('dbo.sp_ApproveBooking')) <> 3
+   OR NOT EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID('dbo.sp_ApproveBooking') AND name = '@BookingId' AND TYPE_NAME(user_type_id) = 'int')
+   OR NOT EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID('dbo.sp_ApproveBooking') AND name = '@ApproverId' AND TYPE_NAME(user_type_id) = 'varchar' AND max_length = 50)
+   OR NOT EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID('dbo.sp_ApproveBooking') AND name = '@DecisionNote' AND TYPE_NAME(user_type_id) = 'nvarchar' AND max_length = -1)
+   OR (SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID('dbo.sp_EscalateMaintenanceImpact')) <> 2
+   OR NOT EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID('dbo.sp_EscalateMaintenanceImpact') AND name = '@MaintenanceId' AND TYPE_NAME(user_type_id) = 'int')
+   OR NOT EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID('dbo.sp_EscalateMaintenanceImpact') AND name = '@ChangedByUserId' AND TYPE_NAME(user_type_id) = 'varchar' AND max_length = 50)
+   OR (SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID('dbo.sp_SubmitBooking')) <> 8
+   OR NOT EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID('dbo.sp_SubmitBooking') AND name = '@Acknowledgements' AND TYPE_NAME(user_type_id) = 'BookingAdvisoryAckListType')
+   OR NOT EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID('dbo.sp_SubmitBooking') AND name = '@BookingId' AND TYPE_NAME(user_type_id) = 'int' AND is_output = 1)
+    THROW 52000, 'Protected procedure signatures do not match the accepted Step 12 contract.', 1;
+
+IF EXISTS
+   (SELECT 1 FROM sys.triggers
+    WHERE object_id IN (OBJECT_ID('dbo.TR_BOOKING_ADVISORY_ACK_IMMUTABLE'), OBJECT_ID('dbo.TR_MAINTENANCE_IMPACT_HISTORY_IMMUTABLE'))
+      AND is_disabled = 1)
+   OR OBJECT_DEFINITION(OBJECT_ID('dbo.sp_SubmitBooking')) NOT LIKE '%UPDLOCK%HOLDLOCK%'
+   OR OBJECT_DEFINITION(OBJECT_ID('dbo.sp_ApproveBooking')) NOT LIKE '%UPDLOCK%HOLDLOCK%'
+   OR OBJECT_DEFINITION(OBJECT_ID('dbo.sp_EscalateMaintenanceImpact')) NOT LIKE '%UPDLOCK%HOLDLOCK%'
+   OR OBJECT_DEFINITION(OBJECT_ID('dbo.sp_SubmitBooking')) LIKE '%WAITFOR%'
+   OR OBJECT_DEFINITION(OBJECT_ID('dbo.sp_ApproveBooking')) LIKE '%WAITFOR%'
+   OR OBJECT_DEFINITION(OBJECT_ID('dbo.sp_EscalateMaintenanceImpact')) LIKE '%WAITFOR%'
+    THROW 52000, 'Protected definitions or immutable trigger state do not match the Step 12 testing contract.', 1;
+
+SELECT DB_NAME() AS verified_database,
+       d.compatibility_level,
+       d.is_read_committed_snapshot_on,
+       d.snapshot_isolation_state_desc
+FROM sys.databases AS d
+WHERE d.database_id = DB_ID();
+
+SELECT p.name AS verified_procedure, p.modify_date
+FROM sys.procedures AS p
+WHERE p.object_id IN
+      (OBJECT_ID('dbo.sp_SubmitBooking'), OBJECT_ID('dbo.sp_ApproveBooking'),
+       OBJECT_ID('dbo.sp_EscalateMaintenanceImpact'))
+ORDER BY p.name;
+
+PRINT 'Verified migrated columns, protected signatures/locks, enabled immutable triggers, and no production WAITFOR.';
+
+IF EXISTS (SELECT 1 FROM dbo.[USER] WHERE user_id LIKE 'T13-%')
+   OR EXISTS (SELECT 1 FROM dbo.SPACE WHERE space_code LIKE 'T13-%')
+   OR OBJECT_ID('dbo.STEP13_UNSAFE_BOOKING', 'U') IS NOT NULL
+   OR OBJECT_ID('dbo.STEP13_TEST_CONFIG', 'U') IS NOT NULL
+   OR OBJECT_ID('dbo.STEP13_MAINTENANCE_RESULT', 'U') IS NOT NULL
+    THROW 52000, 'This disposable database already contains Step 13 state. Drop it and create a fresh database.', 1;
+
 BEGIN TRY
     BEGIN TRANSACTION;
-
-    DELETE FROM dbo.MAINTENANCE_IMPACT_HISTORY
-    WHERE changed_by_user_id LIKE 'T13-%'
-       OR maintenance_id IN
-          (SELECT maintenance_id FROM dbo.MAINTENANCERECORD WHERE space_code LIKE 'T13-%');
-
-    DELETE FROM dbo.BOOKING_ADVISORY_ACK
-    WHERE booking_id IN (SELECT booking_id FROM dbo.BOOKING WHERE space_code LIKE 'T13-%')
-       OR maintenance_id IN
-          (SELECT maintenance_id FROM dbo.MAINTENANCERECORD WHERE space_code LIKE 'T13-%');
-
-    DELETE FROM dbo.BOOKING WHERE space_code LIKE 'T13-%';
-    DELETE FROM dbo.MAINTENANCERECORD WHERE space_code LIKE 'T13-%';
-    DELETE FROM dbo.SPACE WHERE space_code LIKE 'T13-%';
-    DELETE FROM dbo.[USER] WHERE user_id LIKE 'T13-%';
 
     INSERT INTO dbo.[USER]
         (user_id, email, full_name, phone_number, role, department, account_status)
@@ -54,11 +111,6 @@ BEGIN TRY
         ('T13-SPACE-A', 'T13-STUDENT', 'T13-STAFF', 'Projector Failure',
          N'Advisory non-blocking test.', '2035-11-01T09:30:00', '2035-11-01T10:30:00',
          'In Progress', NULL, 'advisory');
-
-    /* Recreate test-only helpers so setup also upgrades an older package run. */
-    DROP TABLE IF EXISTS dbo.STEP13_MAINTENANCE_RESULT;
-    DROP TABLE IF EXISTS dbo.STEP13_TEST_CONFIG;
-    DROP TABLE IF EXISTS dbo.STEP13_UNSAFE_BOOKING;
 
     CREATE TABLE dbo.STEP13_UNSAFE_BOOKING
     (
@@ -108,8 +160,6 @@ BEGIN TRY
     DECLARE @EmptyAcks dbo.BookingAdvisoryAckListType;
     DECLARE @JulyAcks dbo.BookingAdvisoryAckListType;
     DECLARE @NovemberAcks dbo.BookingAdvisoryAckListType;
-    DECLARE @BookingA INT;
-    DECLARE @BookingB INT;
     DECLARE @IgnoredBookingId INT;
 
     INSERT INTO @JulyAcks (maintenance_id)
@@ -124,14 +174,6 @@ BEGIN TRY
     WHERE space_code = 'T13-SPACE-A'
       AND problem_description = N'Advisory non-blocking test.';
 
-    EXEC dbo.sp_SubmitBooking 'T13-STUDENT', 'T13-SPACE-A', '2035-06-01T09:00:00', '2035-06-01T11:00:00', 'Meeting', 10, @EmptyAcks, @BookingA OUTPUT;
-    EXEC dbo.sp_SubmitBooking 'T13-STUDENT', 'T13-SPACE-A', '2035-06-01T10:00:00', '2035-06-01T12:00:00', 'Meeting', 10, @EmptyAcks, @BookingB OUTPUT;
-
-    INSERT INTO dbo.STEP13_TEST_CONFIG
-        (config_id, pairing, booking_a_id, booking_b_id, session_a_finished, session_b_finished)
-    VALUES
-        (1, 'StaffStaff', @BookingA, @BookingB, 0, 0);
-
     EXEC dbo.sp_SubmitBooking 'T13-STUDENT', 'T13-SPACE-A', '2035-07-01T09:00:00', '2035-07-01T11:00:00', 'Meeting', 10, @JulyAcks, @IgnoredBookingId OUTPUT;
     EXEC dbo.sp_SubmitBooking 'T13-STUDENT', 'T13-SPACE-A', '2035-08-01T09:00:00', '2035-08-01T10:00:00', 'Meeting', 10, @EmptyAcks, @IgnoredBookingId OUTPUT;
     EXEC dbo.sp_SubmitBooking 'T13-STUDENT', 'T13-SPACE-A', '2035-08-01T09:00:00', '2035-08-01T10:00:00', 'Seminar', 10, @EmptyAcks, @IgnoredBookingId OUTPUT;
@@ -142,7 +184,7 @@ BEGIN TRY
     EXEC dbo.sp_SubmitBooking 'T13-STUDENT', 'T13-SPACE-B', '2035-10-01T09:00:00', '2035-10-01T11:00:00', 'Meeting', 10, @EmptyAcks, @IgnoredBookingId OUTPUT;
     EXEC dbo.sp_SubmitBooking 'T13-STUDENT', 'T13-SPACE-A', '2035-11-01T09:00:00', '2035-11-01T11:00:00', 'Meeting', 10, @NovemberAcks, @IgnoredBookingId OUTPUT;
 
-    PRINT 'Step 13 test data is ready. Default protected pairing: StaffStaff.';
+    PRINT 'Step 13 common test data is ready. Configure one protected pairing once if required.';
 END TRY
 BEGIN CATCH
     THROW;

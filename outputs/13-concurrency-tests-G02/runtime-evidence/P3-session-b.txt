@@ -1,0 +1,8 @@
+Changed database context to 'Step13G02_P3'.
+P3 B calls the real Staff approval at 2026-08-09T13:57:38.2643609. It must wait on A's test SPACE gate.
+result                        booking_id  booking_status                 resolution_path      observed_at                           
+----------------------------- ----------- ------------------------------ -------------------- --------------------------------------
+P3 B Staff approval completed      105010 Approved                       Staff                           2026-08-09 13:57:47.4305407
+worker_session_id worker_open_transaction_count
+----------------- -----------------------------
+               95                             0

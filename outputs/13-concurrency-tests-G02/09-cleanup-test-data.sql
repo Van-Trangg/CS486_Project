@@ -1,38 +1,19 @@
-/* Deletes only Step 13 test rows and drops only Step 13 helper tables. */
-USE University;
+/* Drops only the explicitly named Step13G02_* disposable database. */
+USE master;
 GO
-SET ANSI_NULLS, ANSI_PADDING, ANSI_WARNINGS, ARITHABORT, CONCAT_NULL_YIELDS_NULL, QUOTED_IDENTIFIER ON;
-SET NUMERIC_ROUNDABORT OFF;
-GO
-SET XACT_ABORT ON;
 
-BEGIN TRY
-    BEGIN TRANSACTION;
+DECLARE @DatabaseName SYSNAME = N'$(DatabaseName)';
 
-    DELETE FROM dbo.MAINTENANCE_IMPACT_HISTORY
-    WHERE changed_by_user_id LIKE 'T13-%'
-       OR maintenance_id IN
-          (SELECT maintenance_id FROM dbo.MAINTENANCERECORD WHERE space_code LIKE 'T13-%');
+IF @DatabaseName NOT LIKE N'Step13G02[_]%'
+    THROW 52090, 'Cleanup refuses to drop a database unless its name matches Step13G02_*.', 1;
 
-    DELETE FROM dbo.BOOKING_ADVISORY_ACK
-    WHERE booking_id IN (SELECT booking_id FROM dbo.BOOKING WHERE space_code LIKE 'T13-%')
-       OR maintenance_id IN
-          (SELECT maintenance_id FROM dbo.MAINTENANCERECORD WHERE space_code LIKE 'T13-%');
+IF DB_ID(@DatabaseName) IS NULL
+    THROW 52091, 'The requested Step 13 disposable database does not exist.', 1;
 
-    DELETE FROM dbo.BOOKING WHERE space_code LIKE 'T13-%';
-    DELETE FROM dbo.MAINTENANCERECORD WHERE space_code LIKE 'T13-%';
-    DELETE FROM dbo.SPACE WHERE space_code LIKE 'T13-%';
-    DELETE FROM dbo.[USER] WHERE user_id LIKE 'T13-%';
+DECLARE @DropSql NVARCHAR(MAX) =
+    N'ALTER DATABASE ' + QUOTENAME(@DatabaseName) + N' SET SINGLE_USER WITH ROLLBACK IMMEDIATE; '
+  + N'DROP DATABASE ' + QUOTENAME(@DatabaseName) + N';';
 
-    COMMIT TRANSACTION;
-
-    DROP TABLE IF EXISTS dbo.STEP13_MAINTENANCE_RESULT;
-    DROP TABLE IF EXISTS dbo.STEP13_TEST_CONFIG;
-    DROP TABLE IF EXISTS dbo.STEP13_UNSAFE_BOOKING;
-    PRINT 'Step 13 test data removed.';
-END TRY
-BEGIN CATCH
-    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
-    THROW;
-END CATCH;
+EXEC sys.sp_executesql @DropSql;
+PRINT 'Dropped Step 13 disposable database ' + @DatabaseName + '.';
 GO
