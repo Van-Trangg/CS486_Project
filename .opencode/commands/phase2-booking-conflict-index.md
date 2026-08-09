@@ -42,7 +42,7 @@ Run this workflow:
 10. Do not modify room-finder or other reporting sections.
 11. Do not remove the per-space lock or make correctness depend on the index.
 12. Run the review and create:
-   - `docs/15-booking-conflict-index-tuning-review-G02.md`
+   - `docs/16-booking-conflict-index-tuning-review-G02.md`
 13. Fix blocking, major, and safe minor issues only within this tuning scope, then review again.
 14. Stop when ready or when runtime/data limitations require user input.
 

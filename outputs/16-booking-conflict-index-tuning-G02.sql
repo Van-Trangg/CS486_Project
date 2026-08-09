@@ -268,8 +268,8 @@ WHERE p.booking_status = 'Pending'
   )
 ORDER BY
     d.occupying_booking_count DESC,
-    p.booking_id;
-
+    p.booking_id
+OPTION (MAXDOP 1);
 IF NOT EXISTS (SELECT 1 FROM #BenchmarkParameters)
     THROW 51045,
           'No representative Pending booking with a real occupying conflict was found.',
@@ -320,9 +320,9 @@ IF EXISTS
       AND name = 'IX_BOOKING_ConflictLookup'
 )
 BEGIN
-    THROW 51046,
+    ;THROW 51046,
           'Candidate index still exists before baseline benchmark.',
-          1;
+          1
 END;
 GO
 /* ============================================================
@@ -570,14 +570,14 @@ FROM #BenchmarkResults
 WHERE phase = 'AFTER';
 
 IF @BeforeResult IS NULL OR @AfterResult IS NULL
-BEGIN
+BEGIN;
     THROW 51049,
           'Before or after benchmark result is missing.',
           1;
 END;
 
 IF @BeforeResult <> @AfterResult
-BEGIN
+BEGIN;
     THROW 51050,
           'Before/after booking conflict results differ.',
           1;
