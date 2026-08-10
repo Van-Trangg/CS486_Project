@@ -333,7 +333,32 @@ GO
 
 PRINT '--- Query 4: Approved Bookings Affected by Maintenance Escalation ---';
 
-;WITH Escalations AS
+
+-- Deterministic positive case in the Step 14 dataset; callers replace this ID.
+DECLARE @maintenance_id INT = 78;
+
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.MAINTENANCERECORD AS m
+    WHERE m.maintenance_id = @maintenance_id
+      AND m.impact_level = 'out-of-service'
+      AND EXISTS
+      (
+          SELECT 1
+          FROM dbo.MAINTENANCE_IMPACT_HISTORY AS h
+          WHERE h.maintenance_id = m.maintenance_id
+            AND h.old_impact_level = 'advisory'
+            AND h.new_impact_level = 'out-of-service'
+      )
+)
+    THROW 51604,
+          'MaintenanceId must identify a currently out-of-service record with a recorded advisory-to-out-of-service escalation.',
+          1;
+
+
+;WITH TargetMaintenance AS
 (
     SELECT
         m.maintenance_id,
@@ -342,79 +367,92 @@ PRINT '--- Query 4: Approved Bookings Affected by Maintenance Escalation ---';
         m.completion_time,
         m.maintenance_status,
         m.impact_level,
-        h.history_id AS escalation_history_id,
-        h.changed_at AS escalated_at,
-        h.changed_by_user_id AS escalated_by_user_id,
-        ROW_NUMBER() OVER
-        (
-            PARTITION BY m.maintenance_id
-            ORDER BY h.changed_at DESC, h.history_id DESC
-        ) AS rn
+        escalation.history_id AS escalation_history_id,
+        escalation.changed_at AS escalated_at,
+        escalation.changed_by_user_id
     FROM dbo.MAINTENANCERECORD AS m
-    JOIN dbo.MAINTENANCE_IMPACT_HISTORY AS h
-        ON h.maintenance_id = m.maintenance_id
-       AND h.old_impact_level = 'advisory'
-       AND h.new_impact_level = 'out-of-service'
-    WHERE m.impact_level = 'out-of-service'
+    CROSS APPLY
+    (
+        SELECT TOP (1)
+            h.history_id,
+            h.changed_at,
+            h.changed_by_user_id
+        FROM dbo.MAINTENANCE_IMPACT_HISTORY AS h
+        WHERE h.maintenance_id = m.maintenance_id
+          AND h.old_impact_level = 'advisory'
+          AND h.new_impact_level = 'out-of-service'
+        ORDER BY h.changed_at DESC, h.history_id DESC
+    ) AS escalation
+    WHERE m.maintenance_id = @maintenance_id
+      AND m.impact_level = 'out-of-service'
 )
 SELECT
-    e.maintenance_id,
-    e.escalation_history_id,
-    e.escalated_at,
-    e.escalated_by_user_id,
-    e.maintenance_status,
-    e.start_time AS maintenance_start_time,
-    e.completion_time AS maintenance_completion_time,
-
+    tm.maintenance_id,
+    tm.escalation_history_id,
+    tm.escalated_at,
+    tm.changed_by_user_id AS escalated_by_user_id,
+    escalation_user.full_name AS escalated_by_name,
+    tm.impact_level AS maintenance_impact_level,
+    tm.maintenance_status,
+    tm.start_time AS maintenance_start_time,
+    tm.completion_time AS maintenance_completion_time,
     s.space_code,
     s.space_name,
-
+    s.building,
+    s.floor,
+    s.room_number,
     b.booking_id,
-    b.requested_start,
-    b.requested_end,
+    b.requested_start AS booking_start_time,
+    b.requested_end AS booking_end_time,
     b.booking_status,
-    b.approval_path,
+    b.resolution_path,
     b.decision_time,
     b.purpose,
     b.expected_participants,
-
     u.user_id AS requester_id,
     u.full_name AS requester_name,
     u.email AS requester_email,
-    u.phone_number AS requester_phone_number
-
-FROM Escalations AS e
-
+    u.phone_number AS requester_phone_number,
+    CASE
+        WHEN b.requested_start > tm.start_time THEN b.requested_start
+        ELSE tm.start_time
+    END AS overlap_start_time,
+    CASE
+        WHEN b.requested_end < ISNULL(tm.completion_time, CONVERT(DATETIME, '9999-12-31', 120))
+            THEN b.requested_end
+        ELSE ISNULL(tm.completion_time, CONVERT(DATETIME, '9999-12-31', 120))
+    END AS overlap_end_time,
+    DATEDIFF
+    (
+        MINUTE,
+        CASE
+            WHEN b.requested_start > tm.start_time THEN b.requested_start
+            ELSE tm.start_time
+        END,
+        CASE
+            WHEN b.requested_end < ISNULL(tm.completion_time, CONVERT(DATETIME, '9999-12-31', 120))
+                THEN b.requested_end
+            ELSE ISNULL(tm.completion_time, CONVERT(DATETIME, '9999-12-31', 120))
+        END
+    ) AS overlap_minutes
+FROM TargetMaintenance AS tm
 JOIN dbo.SPACE AS s
-    ON s.space_code = e.space_code
-
+    ON s.space_code = tm.space_code
 JOIN dbo.BOOKING AS b
-    ON b.space_code = e.space_code
-
-   -- Booking is approved
+    ON b.space_code = tm.space_code
    AND b.booking_status = 'Approved'
-
-   -- Booking overlaps the maintenance period
-   AND b.requested_start <
-       ISNULL(
-           e.completion_time,
-           CONVERT(DATETIME, '9999-12-31', 120)
-       )
-   AND b.requested_end > e.start_time
-
-   -- Booking was already approved when escalation occurred
-   AND b.decision_time <= e.escalated_at
-
+   AND b.decision_time <= tm.escalated_at
+   AND b.requested_start < ISNULL(tm.completion_time, CONVERT(DATETIME, '9999-12-31', 120))
+   AND b.requested_end > tm.start_time
 JOIN dbo.[USER] AS u
     ON u.user_id = b.requester_id
+JOIN dbo.[USER] AS escalation_user
+    ON escalation_user.user_id = tm.changed_by_user_id
+ORDER BY b.requested_start, b.booking_id;
+GO
 
--- Use the most recent Advisory -> Out-of-Service escalation
-WHERE e.rn = 1
 
-ORDER BY
-    e.escalated_at DESC,
-    e.maintenance_id,
-    b.requested_start,
-    b.booking_id;
-
+PRINT '============================================================';
+PRINT 'Query 4 Execution Complete';
+PRINT '============================================================';
 GO
