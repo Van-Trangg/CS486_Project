@@ -371,7 +371,7 @@ WHERE impact_level = 'out-of-service';
 ## After-Index Plan and Measurements
 
 - BOOKING access: `Index Seek` on `IX_BOOKING_OCCUPYING_OVERLAP` (filter widened to `IN ('Approved','Checked In')`), 35 executions, 8 rows read cumulatively. Logical reads: 74.
-- MAINTENANCERECORD access: `Index Seek` on `IX_MAINTOOS_OVERLAP`, 28 executions, 2 rows read cumulatively. Logical reads: 56.
+- MAINTENANCERECORD access: `Index Seek` on `IX_MAINTENANCE_OOS_OVERLAP`, 28 executions, 2 rows read cumulatively. Logical reads: 56.
 - Query-level CPU / elapsed time (Trial 3): 0 ms / 0 ms — below SSMS's 1 ms reporting resolution; client processing time 9 ms, total execution time 15 ms.
 - Result rows: 28, confirmed via the results grid (matches baseline).
 
@@ -380,7 +380,7 @@ WHERE impact_level = 'out-of-service';
 | Metric | Before | After | Change |
 | --- | ---: | ---: | ---: |
 | BOOKING access | Clustered scan on `PK_BOOKING` | Index seek on `IX_BOOKING_OCCUPYING_OVERLAP` | Improved |
-| MAINTENANCERECORD access | Clustered scan on `PK_MAINTENANCERECORD` | Index seek on `IX_MAINTOOS_OVERLAP` | Improved |
+| MAINTENANCERECORD access | Clustered scan on `PK_MAINTENANCERECORD` | Index seek on `IX_MAINTENANCE_OOS_OVERLAP` | Improved |
 | BOOKING logical reads | 62,562 | 74 | -62,488 (99.88%) |
 | MAINTENANCERECORD logical reads | 2,660 | 56 | -2,604 (97.89%) |
 | Query CPU time | 3,993 ms | sub-millisecond (~0 ms) | ~100% reduction |
@@ -400,4 +400,4 @@ WHERE impact_level = 'out-of-service';
 
 ## Conclusion
 
-Retain `IX_BOOKING_OCCUPYING_OVERLAP` (Approved/Checked-In filter) and `IX_MAINTOOS_OVERLAP`. Both `NOT EXISTS` checks moved from clustered scans to filtered index seeks: BOOKING logical reads fell from 62,562 to 74 (99.88%), MAINTENANCERECORD from 2,660 to 56 (97.89%), and query time dropped from a 3,993 ms / 5,416 ms CPU/elapsed baseline to below the 1 ms reporting resolution, while the 28-row result set was identical before and after.
+Retain `IX_BOOKING_OCCUPYING_OVERLAP` (Approved/Checked-In filter) and `IX_MAINTENANCE_OOS_OVERLAP`. Both `NOT EXISTS` checks moved from clustered scans to filtered index seeks: BOOKING logical reads fell from 62,562 to 74 (99.88%), MAINTENANCERECORD from 2,660 to 56 (97.89%), and query time dropped from a 3,993 ms / 5,416 ms CPU/elapsed baseline to below the 1 ms reporting resolution, while the 28-row result set was identical before and after.
