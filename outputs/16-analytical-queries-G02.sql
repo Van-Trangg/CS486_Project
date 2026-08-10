@@ -226,7 +226,7 @@ ON BOOKING(space_code, requested_start)
 INCLUDE (requested_end)
 WHERE booking_status IN ('Approved', 'Checked In')
 
-CREATE INDEX IX_MAINTOOS_OVERLAP
+CREATE INDEX IX_MAINTENANCE_OOS_OVERLAP
 ON MAINTENANCERECORD(space_code, start_time, completion_time)
 INCLUDE (maintenance_status)
 WHERE impact_level='out-of-service'
