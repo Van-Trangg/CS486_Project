@@ -59,7 +59,7 @@ IF OBJECT_ID('dbo.SPACE', 'U') IS NULL
    OR OBJECT_ID('dbo.MAINTENANCERECORD', 'U') IS NULL
    OR OBJECT_ID('dbo.MAINTENANCE_IMPACT_HISTORY', 'U') IS NULL
 BEGIN
-    THROW 51000, 'Step 12 requires the Phase 1 schema and Step 10 migration.', 1;
+    ;THROW 51000, 'Step 12 requires the Phase 1 schema and Step 10 migration.', 1;
 END;
 GO
 
@@ -413,7 +413,7 @@ BEGIN
         END
         ELSE
         BEGIN
-            THROW 51011,
+            ;THROW 51011,
                   'Booking has an invalid resolution path.',
                   1;
         END;
